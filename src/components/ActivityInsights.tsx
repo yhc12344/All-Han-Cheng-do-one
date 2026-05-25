@@ -1,4 +1,6 @@
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
+import { useRef, useEffect } from "react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { buildHeartRateZones, resolveHeartRateZoneIndex } from "../lib/hrZones";
@@ -62,6 +64,13 @@ export function ActivityInsights({
   const isDark = theme === "dark";
   const { t: tr } = useTranslation();
   const axisColor = isDark ? "#8899b8" : "#64748b";
+
+  const chartInstancesRef = useRef<any[]>([]);
+  const isDispatchingRef = useRef(false);
+
+  useEffect(() => {
+    chartInstancesRef.current = [];
+  }, [records]);
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
   const tooltipBorder = isDark ? "rgba(100, 140, 220, 0.2)" : "rgba(0, 0, 0, 0.08)";
@@ -130,7 +139,7 @@ export function ActivityInsights({
       if (!Number.isFinite(parsed)) return null;
       const relMs = parsed - t0;
       if (relMs < 0) return null;
-      return { xAxis: relMs, name: `Lap ${idx + 1}` };
+      return { xAxis: relMs, name: `L${idx + 1}` };
     })
     .filter((m): m is { xAxis: number; name: string } => m !== null);
 
@@ -165,7 +174,7 @@ export function ActivityInsights({
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 50, right: 16, top: 42, bottom: 46 },
+    grid: { left: 54, right: 54, top: 42, bottom: 46 },
     xAxis: {
       type: "value",
       axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
@@ -198,7 +207,7 @@ export function ActivityInsights({
           animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
-          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          label: { show: false }, // Hide redundant split text labels on supplementary trend charts
           data: lapMarkers,
         } : undefined,
       },
@@ -217,7 +226,7 @@ export function ActivityInsights({
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 50, right: 16, top: 42, bottom: 46 },
+    grid: { left: 54, right: 54, top: 42, bottom: 46 },
     xAxis: {
       type: "value",
       axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
@@ -249,7 +258,7 @@ export function ActivityInsights({
           animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
-          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          label: { show: false }, // Hide redundant split text labels on supplementary trend charts
           data: lapMarkers,
         } : undefined,
       },
@@ -262,23 +271,47 @@ export function ActivityInsights({
       ...tooltipStyle,
       formatter: (p: any) => `${p.marker} ${p.name}: <strong>${Number(p.value).toFixed(2)} min</strong>`
     },
-    legend: { bottom: 0, textStyle: { color: axisColor, fontSize: 12 } },
+    legend: { 
+      type: "scroll",
+      bottom: 0, 
+      left: "center",
+      textStyle: { color: axisColor, fontSize: 11 },
+      pageIconColor: isDark ? "#38bdf8" : "#0284c7",
+      pageTextStyle: { color: axisColor }
+    },
     series: [
       {
         type: "pie",
-        radius: ["38%", "72%"],
+        radius: ["45%", "75%"],
         padAngle: 2,
+        avoidLabelOverlap: true,
         itemStyle: {
           borderRadius: 8,
           borderColor: isDark ? "#0b1220" : "#ffffff",
           borderWidth: 3,
         },
-        label: { color: axisColor, fontSize: 12, formatter: (p: any) => `${p.name}\n${Number(p.value).toFixed(1)} min` },
-        data: hrZones.map((zone, idx) => ({
-          name: zone.name,
-          value: zoneMinutes[idx],
-          itemStyle: { color: zone.color },
-        })),
+        label: { 
+          color: axisColor, 
+          fontSize: 11, 
+          fontWeight: "600",
+          formatter: (p: any) => {
+            const shortName = p.name && p.name.includes(" ") ? p.name.split(" ")[0] : (p.name || "");
+            const val = typeof p.value === "number" ? p.value : 0;
+            const pct = typeof p.percent === "number" && !Number.isNaN(p.percent) ? p.percent : 0;
+            return `${shortName}: ${val.toFixed(1)}m (${pct.toFixed(0)}%)`;
+          }
+        },
+        data: hrZones.map((zone, idx) => {
+          const val = zoneMinutes[idx] ?? 0;
+          const showLabel = val > 0.05; // Hide labels and label lines entirely if 0.0 min
+          return {
+            name: zone.name,
+            value: val,
+            itemStyle: { color: zone.color },
+            label: { show: showLabel },
+            labelLine: { show: showLabel }
+          };
+        }),
       },
     ],
   };
@@ -301,7 +334,7 @@ export function ActivityInsights({
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 44, right: hasPowerData ? 44 : 16, top: 44, bottom: 44 },
+    grid: { left: 54, right: 54, top: 42, bottom: 46 },
     xAxis: {
       type: "value",
       axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
@@ -341,7 +374,7 @@ export function ActivityInsights({
           animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
-          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          label: { show: false }, // Hide redundant split text labels on supplementary trend charts
           data: lapMarkers,
         } : undefined,
       },
@@ -586,6 +619,84 @@ export function ActivityInsights({
     })),
   };
 
+  const registerChart = (instance: any, index: number) => {
+    enableChartWheelPageScroll(instance);
+    chartInstancesRef.current[index] = instance;
+
+    instance.off("updateAxisPointer");
+    instance.off("globalout");
+
+    instance.on("updateAxisPointer", (params: any) => {
+      if (isDispatchingRef.current) return;
+      if (!params || !params.axesInfo || params.axesInfo.length === 0) return;
+      const xVal = params.axesInfo[0].value;
+      if (xVal === undefined || xVal === null) return;
+
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart || otherChart === instance) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+
+          try {
+            const option = otherChart.getOption();
+            if (!option || !option.series || !option.series.length) return;
+
+            const firstSeries = option.series[0];
+            if (!firstSeries || !firstSeries.data || !firstSeries.data.length) return;
+
+            const data = firstSeries.data;
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            for (let i = 0; i < data.length; i++) {
+              const pt = data[i];
+              const ptX = Array.isArray(pt) ? pt[0] : (pt?.value ? pt.value[0] : null);
+              if (ptX !== null && ptX !== undefined) {
+                const diff = Math.abs(ptX - xVal);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestIndex = i;
+                }
+              }
+            }
+
+            otherChart.dispatchAction({
+              type: "showTip",
+              seriesIndex: 0,
+              dataIndex: closestIndex,
+            });
+          } catch (e) {
+            // Suppress background sync errors on charts being disposed/re-rendered
+          }
+        });
+      } catch (err) {
+        console.error("Error synchronizing ActivityInsights charts hover:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
+
+    instance.on("globalout", () => {
+      if (isDispatchingRef.current) return;
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+          try {
+            otherChart.dispatchAction({
+              type: "hideTip",
+            });
+          } catch (e) {}
+        });
+      } catch (err) {
+        console.error("Error hiding ActivityInsights charts tooltips:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
+  };
+
   const zoomEvents = {
     datazoom: (evt: any) => {
       const batch = evt?.batch?.[0];
@@ -601,7 +712,7 @@ export function ActivityInsights({
     <section className="insight-grid">
       <article className="panel">
         <h3>{tr("insights.speedTrend")}</h3>
-        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
@@ -609,6 +720,10 @@ export function ActivityInsights({
           <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
+      <article className="panel">
+        <h3>{hasPowerData ? tr("insights.cadenceAndPower") : tr("insights.cadence")}</h3>
+        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 280, width: "100%" }} />
+      </article>
       {hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.hrHistogram")}</h3>
@@ -616,16 +731,12 @@ export function ActivityInsights({
         </article>
       )}
       <article className="panel">
-        <h3>{hasPowerData ? tr("insights.cadenceAndPower") : tr("insights.cadence")}</h3>
-        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        <h3>{tr("insights.elevation")}</h3>
+        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>{tr("insights.effortHeatmap")}</h3>
         <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
-      <article className="panel">
-        <h3>{tr("insights.elevation")}</h3>
-        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">

@@ -48,20 +48,6 @@
 - [Declaration](#declaration)
 - [License](#license)
 
-## Screenshots
-
-<p align="center">
-  <img src="screenshots/overview_page.png" alt="Overview Page" width="90%" />
-</p>
-
-<p align="center">
-  <img src="screenshots/individual_page.png" alt="Individual Page" width="90%" />
-</p>
-
-<p align="center">
-  <img src="screenshots/compare_page.png" alt="Compare Page" width="90%" />
-</p>
-
 ## Features
 
 - **FIT File Parsing**: Native Rust parser using the `fitparser` crate. Supports all standard Garmin FIT activity files with automatic field extraction.
@@ -175,6 +161,16 @@ All data (DuckDB database, config) is stored in a Docker named volume mapped to 
 
 The desktop app runs the Rust backend natively with Tauri IPC — no web server needed.
 
+### Fresh Setup & Data Portability
+
+FIT Dashboard is a **local-first application**. To protect your privacy, your analytical databases and raw `.fit` telemetry files are gitignored and **never** uploaded to GitHub or any cloud provider.
+
+If you clone the repository onto a fresh machine or set up a new environment, the dashboard will initially load in a **blank onboarding state**.
+
+#### How to Restore/Migrate Your Data:
+*   **Method A: Sync from Garmin Connect (Recommended):** Set up the command-line integration and run the sync script (detailed in [Option C](#option-c-automated-powershell-sync-script-windows) below). It will download your history and populate the dashboard automatically.
+*   **Method B: Direct File Transfer:** Copy your existing `activities/` directory (containing raw `.fit` files) and your DuckDB database files (`*.duckdb`, `*.db`) from your old setup into your new project root. The dashboard will automatically read and render all your historical telemetry instantly.
+
 ## Getting FIT Files from Garmin
 
 If your activities are in Garmin Connect, you can export FIT files in two ways.
@@ -226,29 +222,49 @@ Tips:
 - You can import `.fit`, `.tcx`, and `.gpx` files in FIT Dashboard.
 - If duplicate files are imported, FIT Dashboard will skip them automatically. But if you have the save activity file in different format, it may still cause duplicate. We de-duplicate them based on file hash and exact start and end timestamp match of an activity. 
 
-### Option C: Use Garmin-CLI tool
+### Option C: Automated PowerShell Sync Script (Windows/PowerShell)
 
-If you prefer the command line, [Garmin-CLI](https://github.com/vicentereig/garmin-cli) can list your activities and download the original Garmin export for a specific activity. This can be easily automated to batch download multiple activities.
+We provide an automated, zero-config PowerShell script to sync and pull the last 100 activities from Garmin Connect automatically.
 
 **Steps:**
+1. Install [Garmin-CLI](https://github.com/vicentereig/garmin-cli) (`cargo install garmin-cli`, or download the prebuilt binary).
+2. Authenticate once with Garmin Connect:
+   ```bash
+   garmin auth login
+   ```
+   *(Supports standard username, password, and OTP multi-factor authentication)*
+3. From your project root directory, run the sync script:
+   ```powershell
+   ./scripts/sync_garmin.ps1
+   ```
+   *Note: This script dynamically targets your activities directory and extracts FIT files cleanly. It will automatically skip any activities that have already been downloaded.*
 
-1. Install Garmin-CLI (`cargo install garmin-cli`, or use the pre-built MacOS/linux binary).
-2. Sign in once with password and OTP (if applicable): `garmin auth login`.
-3. List your activities and copy the activity ID you want: `garmin activities list`. use `--limit 20` to limit the result to last 20 activities
-4. Download the original FIT export for that activity: `garmin activities download <activity-id>`
+### Option D: Manual Command Line (Linux/macOS)
 
-5. Unzip the downloaded archive to get the `.fit` file, then import that file into FIT Dashboard.
+If you prefer manual command-line sync on Unix-based environments, you can list and pull files with `garmin-cli`:
+
+**Steps:**
+1. Install [Garmin-CLI](https://github.com/vicentereig/garmin-cli) (`cargo install garmin-cli`, or download the prebuilt binary).
+2. Sign in: `garmin auth login`.
+3. List your activities to locate the target ID:
+   ```bash
+   garmin activities list --limit 20
+   ```
+4. Download the original FIT export for that activity ID:
+   ```bash
+   garmin activities download <activity-id>
+   ```
+5. Unzip the downloaded archive to retrieve the `.fit` file, and import it into FIT Dashboard.
 
 > [!TIP]
-> You are automate the whole process with this one liner (update the limit to match your need, here it's set as 50) 
+> You can automate the whole process in Unix terminals with this one-liner (here set to pull the last 50 activities):
 > ```bash
 > garmin activities list --limit 50 | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | while read -r id; do garmin activities download "$id" && unzip "activity_${id}.zip" && rm "activity_${id}.zip"; done
->``` 
+> ```
 
-When to use this option:
-
-- You want to batch pull individual activities without using the Garmin Connect web UI.
-- You want a repeatable way to fetch specific activity files by ID.
+When to use CLI/script options:
+*   You want an automated, hands-off way to pull your history.
+*   You want a repeatable, fast sync without loading the Garmin Connect web UI.
 
 
 ## Usage

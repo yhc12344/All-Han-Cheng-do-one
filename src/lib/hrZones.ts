@@ -5,12 +5,12 @@ export type HeartRateZone = {
   color: string;
 };
 
-const HR_ZONE_COLORS = ["#3b82f6", "#22c55e", "#eab308", "#f97316", "#ef4444", "#a855f7", "#06b6d4"];
+const HR_ZONE_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#f97316", "#ef4444", "#a855f7", "#06b6d4"];
 
 export const DEFAULT_HEART_RATE_ZONES: HeartRateZone[] = [
-  { name: "Z1 <=75 bpm", minExclusive: -Infinity, maxInclusive: 75, color: "#3b82f6" },
-  { name: "Z2 76-95 bpm", minExclusive: 75, maxInclusive: 95, color: "#22c55e" },
-  { name: "Z3 96-120 bpm", minExclusive: 95, maxInclusive: 120, color: "#eab308" },
+  { name: "Z1 <=75 bpm", minExclusive: -Infinity, maxInclusive: 75, color: "#38bdf8" },
+  { name: "Z2 76-95 bpm", minExclusive: 75, maxInclusive: 95, color: "#34d399" },
+  { name: "Z3 96-120 bpm", minExclusive: 95, maxInclusive: 120, color: "#fbbf24" },
   { name: "Z4 121-150 bpm", minExclusive: 120, maxInclusive: 150, color: "#f97316" },
   { name: "Z5 >150 bpm", minExclusive: 150, maxInclusive: null, color: "#ef4444" },
 ];

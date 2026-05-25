@@ -272,6 +272,12 @@
   "map.subtitle": "GPS density heatmap with auto-clustering at low zoom levels",
   "map.style": "Style",
   "map.resetZoom": "Reset zoom",
+  "map.storytellerTitle": "Route Storyteller",
+  "map.storytellerSubtitle": "Geographical training profile",
+  "map.primaryHub": "Primary Training Hub",
+  "map.secondaryHub": "Secondary Hub",
+  "map.varietyScore": "Exploration Variety",
+  "map.climateShade": "SG CLIMATE & SHADE INDEX",
 
   "donut.activityTypes": "Activity Types",
   "donut.activities": "Activities",

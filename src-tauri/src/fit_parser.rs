@@ -252,6 +252,56 @@ fn first_valid_coordinates(points: &[RecordPoint]) -> (Option<f64>, Option<f64>)
     (None, None)
 }
 
+fn process_hrv(hrv_intervals: &[f64]) -> Option<(f64, f64, f64)> {
+    if hrv_intervals.is_empty() {
+        return None;
+    }
+    
+    // Auto-detect and normalize units: if average > 10.0, we assume it's in milliseconds.
+    let sum: f64 = hrv_intervals.iter().sum();
+    let avg = sum / hrv_intervals.len() as f64;
+    let is_ms = avg > 10.0;
+    
+    let mut normalized = Vec::new();
+    for &val in hrv_intervals {
+        if val <= 0.0 {
+            continue;
+        }
+        let sec = if is_ms { val / 1000.0 } else { val };
+        // Filter logical R-R intervals (300ms to 2000ms, mapping to 30bpm - 200bpm)
+        if sec >= 0.3 && sec <= 2.0 {
+            normalized.push(sec);
+        }
+    }
+    
+    if normalized.len() < 2 {
+        return None;
+    }
+    
+    // Calculate RMSSD in milliseconds
+    let mut sum_sq_diff = 0.0;
+    let mut count = 0;
+    for i in 0..normalized.len() - 1 {
+        let diff_ms = (normalized[i + 1] - normalized[i]) * 1000.0;
+        sum_sq_diff += diff_ms * diff_ms;
+        count += 1;
+    }
+    let rmssd = if count > 0 {
+        (sum_sq_diff / count as f64).sqrt()
+    } else {
+        0.0
+    };
+    
+    // Calculate SDNN in milliseconds
+    let count_f = normalized.len() as f64;
+    let normalized_ms: Vec<f64> = normalized.iter().map(|&s| s * 1000.0).collect();
+    let mean_rri = normalized_ms.iter().sum::<f64>() / count_f;
+    let variance = normalized_ms.iter().map(|&ms| (ms - mean_rri).powi(2)).sum::<f64>() / (count_f - 1.0);
+    let sdnn = variance.sqrt();
+    
+    Some((rmssd, sdnn, mean_rri))
+}
+
 pub fn parse_activity_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let ext = Path::new(file_name)
         .extension()
@@ -308,8 +358,12 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut session_total_elapsed_time_s: Option<f64> = None;
     let mut session_total_distance_m: Option<f64> = None;
     let mut session_total_calories: Option<i64> = None;
+    let mut session_threshold_power: Option<i64> = None;
+    let mut session_threshold_heart_rate: Option<i64> = None;
+    let mut session_threshold_speed: Option<f64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
     let mut heart_rate_zone_bounds_bpm: Vec<i64> = Vec::new();
+    let mut hrv_intervals: Vec<f64> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
     let mut max_ts: Option<i64> = None;
@@ -390,6 +444,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "total_elapsed_time" => session_total_elapsed_time_s = value_f64(field.value()),
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
                     "total_calories" => session_total_calories = value_i64(field.value()),
+                    "threshold_power" => session_threshold_power = value_i64(field.value()),
+                    "threshold_heart_rate" => session_threshold_heart_rate = value_i64(field.value()),
+                    "threshold_speed" => session_threshold_speed = value_f64(field.value()),
                     _ => {}
                 }
             }
@@ -566,6 +623,29 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 "total_calories": lap_total_calories,
                 "best_speed_m_s": lap_best_speed_m_s
             }));
+        } else if rec.kind() == MesgNum::Hrv || rec.kind() == MesgNum::Value(78) {
+            for field in rec.fields() {
+                if field.name() == "time" {
+                    match field.value() {
+                        Value::Array(arr) => {
+                            for val in arr {
+                                if let Some(sec) = value_f64(val) {
+                                    if sec > 0.0 {
+                                        hrv_intervals.push(sec);
+                                    }
+                                }
+                            }
+                        }
+                        other => {
+                            if let Some(sec) = value_f64(other) {
+                                if sec > 0.0 {
+                                    hrv_intervals.push(sec);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         let rec_kind_name = format!("{:?}", rec.kind()).to_lowercase();
@@ -635,6 +715,16 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         .or(device_info_creator_serial)
         .or(device_info_fallback_serial);
 
+    let hrv_processed = process_hrv(&hrv_intervals);
+    let hrv_summary = hrv_processed.map(|(rmssd, sdnn, mean_rri)| {
+        serde_json::json!({
+            "rmssd_ms": rmssd,
+            "sdnn_ms": sdnn,
+            "mean_rri_ms": mean_rri,
+            "record_count": hrv_intervals.len()
+        })
+    });
+
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
         "device": device,
@@ -663,9 +753,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             "avg_cadence": session_avg_cadence,
             "total_elapsed_time_s": session_total_elapsed_time_s,
             "total_distance_m": session_total_distance_m,
-            "total_calories": session_total_calories
+            "total_calories": session_total_calories,
+            "threshold_power": session_threshold_power,
+            "threshold_heart_rate": session_threshold_heart_rate,
+            "threshold_speed": session_threshold_speed
         },
-        "laps": lap_ranges
+        "laps": lap_ranges,
+        "hrv_summary": hrv_summary
     })
     .to_string();
 

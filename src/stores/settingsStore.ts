@@ -17,6 +17,7 @@ type SettingsState = {
   supporterBadge: boolean;
   donationDismissed: boolean;
   showSettings: boolean;
+  geminiApiKey: string;
   hydrate: () => void;
   toggleSettings: () => void;
   setTheme: (theme: Theme) => void;
@@ -25,6 +26,7 @@ type SettingsState = {
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
   setOverviewTableDays: (days: number) => void;
+  setGeminiApiKey: (key: string) => void;
   loadSupporterStatus: () => Promise<void>;
   verifySupporterCode: (code: string) => Promise<boolean>;
   removeSupporterBadge: () => Promise<void>;
@@ -43,6 +45,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   supporterBadge: false,
   donationDismissed: false,
   showSettings: false,
+  geminiApiKey: "",
 
   hydrate: () => {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -56,6 +59,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         timeFormat: parsed.timeFormat ?? "24h",
         mapStyle: parsed.mapStyle ?? "default",
         overviewTableDays: Number.isFinite(parsed.overviewTableDays) ? Math.max(1, Math.round(parsed.overviewTableDays)) : 7,
+        geminiApiKey: parsed.geminiApiKey ?? "",
       });
     } catch {
       // Ignore invalid persisted data.
@@ -138,6 +142,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.warn("Failed to persist donation dismissed state:", err)
     );
   },
+
+  setGeminiApiKey: (geminiApiKey) => {
+    set({ geminiApiKey });
+    persist({ ...get(), geminiApiKey });
+  },
 }));
 
 function persist(state: SettingsState) {
@@ -150,6 +159,7 @@ function persist(state: SettingsState) {
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,
       overviewTableDays: state.overviewTableDays,
+      geminiApiKey: state.geminiApiKey,
     })
   );
 }

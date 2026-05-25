@@ -24,6 +24,10 @@ export type RecordPoint = {
   cadence?: number;
   power?: number;
   temperature_c?: number;
+  activity_name?: string;
+  sport?: string;
+  duration_s?: number;
+  start_ts_utc?: string;
 };
 
 export type OverviewStats = {

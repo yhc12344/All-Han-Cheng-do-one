@@ -1,4 +1,6 @@
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
+import { useRef, useEffect } from "react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { buildHeartRateZones } from "../lib/hrZones";
@@ -31,6 +33,13 @@ export function ActivityChart({
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
   const { t } = useTranslation();
+
+  const chartInstancesRef = useRef<any[]>([]);
+  const isDispatchingRef = useRef(false);
+
+  useEffect(() => {
+    chartInstancesRef.current = [];
+  }, [records]);
   
   // Format MM:SS or HH:MM:SS
   const formatRelTime = (ms: number) => {
@@ -81,7 +90,7 @@ export function ActivityChart({
       if (!Number.isFinite(parsed)) return null;
       const relMs = parsed - t0;
       if (relMs < 0) return null;
-      return { xAxis: relMs, name: `Lap ${idx + 1}` };
+      return { xAxis: relMs, name: `L${idx + 1}` };
     })
     .filter((m): m is { xAxis: number; name: string } => m !== null);
 
@@ -176,7 +185,18 @@ export function ActivityChart({
           animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
-          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          label: {
+            color: axisColor,
+            fontSize: 9,
+            fontWeight: "bold",
+            formatter: "{b}",
+            position: "insideEndTop",
+            backgroundColor: isDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.9)",
+            padding: [2, 4],
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: isDark ? "rgba(148,163,184,0.3)" : "rgba(71,85,105,0.2)"
+          },
           data: lapMarkers,
         } : undefined,
       },
@@ -251,11 +271,89 @@ export function ActivityChart({
           animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
-          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          label: { show: false }, // Hide redundant/overlapping labels on the bottom inverted-axis chart
           data: lapMarkers,
         } : undefined,
       },
     ],
+  };
+
+  const registerChart = (instance: any, index: number) => {
+    enableChartWheelPageScroll(instance);
+    chartInstancesRef.current[index] = instance;
+
+    instance.off("updateAxisPointer");
+    instance.off("globalout");
+
+    instance.on("updateAxisPointer", (params: any) => {
+      if (isDispatchingRef.current) return;
+      if (!params || !params.axesInfo || params.axesInfo.length === 0) return;
+      const xVal = params.axesInfo[0].value;
+      if (xVal === undefined || xVal === null) return;
+
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart || otherChart === instance) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+
+          try {
+            const option = otherChart.getOption();
+            if (!option || !option.series || !option.series.length) return;
+
+            const firstSeries = option.series[0];
+            if (!firstSeries || !firstSeries.data || !firstSeries.data.length) return;
+
+            const data = firstSeries.data;
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            for (let i = 0; i < data.length; i++) {
+              const pt = data[i];
+              const ptX = Array.isArray(pt) ? pt[0] : (pt?.value ? pt.value[0] : null);
+              if (ptX !== null && ptX !== undefined) {
+                const diff = Math.abs(ptX - xVal);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestIndex = i;
+                }
+              }
+            }
+
+            otherChart.dispatchAction({
+              type: "showTip",
+              seriesIndex: 0,
+              dataIndex: closestIndex,
+            });
+          } catch (e) {
+            // Suppress background sync errors on charts being disposed/re-rendered
+          }
+        });
+      } catch (err) {
+        console.error("Error synchronizing Activity charts hover:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
+
+    instance.on("globalout", () => {
+      if (isDispatchingRef.current) return;
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+          try {
+            otherChart.dispatchAction({
+              type: "hideTip",
+            });
+          } catch (e) {}
+        });
+      } catch (err) {
+        console.error("Error hiding Activity charts tooltips:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
   };
 
   const onEvents = {
@@ -271,8 +369,8 @@ export function ActivityChart({
 
   return (
     <div style={{ display: "grid", gap: 12, minWidth: 0, width: "100%", overflow: "hidden" }}>
-      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
-      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
+      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
+      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
     </div>
   );
 }

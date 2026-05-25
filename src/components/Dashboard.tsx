@@ -7,13 +7,19 @@ import { CompareCharts } from "./CompareCharts";
 import { ActivityInsights } from "./ActivityInsights";
 import { ActivityContributionHeatmap } from "./ActivityContributionHeatmap";
 import { OverviewLocationMap } from "./OverviewLocationMap";
-import { OverviewSportTypeDonut } from "./OverviewSportTypeDonut";
 import { OverviewWeeklyTrend } from "./OverviewWeeklyTrend";
 import { OverviewActivityTable } from "./OverviewActivityTable";
 import { DatePickerPopover } from "./DatePickerPopover";
 import { DateRange } from "react-day-picker";
-import { DonationBanner } from "./DonationBanner";
 import { SettingsPanel } from "./SettingsPanel";
+import { OverviewGoalAndEvent } from "./OverviewGoalAndEvent";
+import { LoadChart } from "./LoadChart";
+import { PowerCurve } from "./PowerCurve";
+import { PersonalBests } from "./PersonalBests";
+import { TrainingScheduler } from "./TrainingScheduler";
+import { BiomechanicalCharts } from "./BiomechanicalCharts";
+import { ReadinessTracker } from "./ReadinessTracker";
+import { analyzeHeartRateRecovery, isValidActivity } from "../lib/analytics";
 import { api } from "../lib/api";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -57,6 +63,9 @@ type ActivityMetadata = {
     total_elapsed_time_s?: number | null;
     total_distance_m?: number | null;
     total_calories?: number | null;
+    threshold_power?: number | null;
+    threshold_heart_rate?: number | null;
+    threshold_speed?: number | null;
   };
   laps?: Array<{
     start_ts_utc?: string | null;
@@ -75,6 +84,12 @@ type ActivityMetadata = {
     total_calories?: number | null;
     best_speed_m_s?: number | null;
   }>;
+  hrv_summary?: {
+    rmssd_ms?: number | null;
+    sdnn_ms?: number | null;
+    mean_rri_ms?: number | null;
+    record_count?: number | null;
+  };
 };
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
@@ -273,7 +288,7 @@ function IconVo2() {
 /* ── Dashboard Component ─────────────────────────────────────────── */
 
 export function Dashboard({ onLogout }: Props) {
-  const [tab, setTab] = useState<"overview" | "individual" | "compare">("overview");
+  const [tab, setTab] = useState<"overview" | "individual" | "compare" | "analytics" | "personal-bests" | "scheduler">("overview");
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -289,7 +304,7 @@ export function Dashboard({ onLogout }: Props) {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(true);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [minDurationMinutes, setMinDurationMinutes] = useState("");
   const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
@@ -321,6 +336,26 @@ export function Dashboard({ onLogout }: Props) {
   const [smoothGraphs, setSmoothGraphs] = useState(true);
   const [appVersion, setAppVersion] = useState("unknown");
   const [versionBadgeStatus, setVersionBadgeStatus] = useState<VersionBadgeStatus>({ state: "hidden", latestVersion: null });
+
+  // Pinned overview widgets state
+  const [pinnedWidgets, setPinnedWidgets] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("fit_pinned_overview_widgets");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const togglePinWidget = (widgetId: string) => {
+    setPinnedWidgets(prev => {
+      const next = prev.includes(widgetId)
+        ? prev.filter(id => id !== widgetId)
+        : [...prev, widgetId];
+      localStorage.setItem("fit_pinned_overview_widgets", JSON.stringify(next));
+      return next;
+    });
+  };
 
   // Inline rename/delete state
   const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
@@ -406,6 +441,8 @@ export function Dashboard({ onLogout }: Props) {
     void loadSupporterStatus();
   }, []);
 
+
+
   function parseUtcDate(input: string): Date {
     const trimmed = input.trim();
     const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
@@ -436,6 +473,40 @@ export function Dashboard({ onLogout }: Props) {
     });
   }, [activities, filterSport, minDurationMinutes, maxDurationMinutes, dateFrom, dateTo, searchQuery]);
 
+  const validActivities = useMemo(() => {
+    return activities.filter(isValidActivity);
+  }, [activities]);
+
+  const validFiltered = useMemo(() => {
+    return filtered.filter(isValidActivity);
+  }, [filtered]);
+
+  // Auto-select most recent activity when entering Analytics or Individual tabs if none is selected
+  useEffect(() => {
+    if ((tab === "analytics" || tab === "individual") && !selectedActivity && validActivities.length > 0) {
+      const sorted = [...validActivities].sort((a, b) => 
+        Date.parse(b.start_ts_utc) - Date.parse(a.start_ts_utc)
+      );
+      if (sorted[0]) {
+        void selectActivity(sorted[0]);
+      }
+    }
+  }, [tab, selectedActivity, validActivities, selectActivity]);
+
+  // Reconciliation: If selectedActivity is invalid, switch it when entering the analytics tab
+  useEffect(() => {
+    if (tab === "analytics" && selectedActivity && !isValidActivity(selectedActivity)) {
+      const sortedValids = [...validActivities].sort((a, b) => 
+        Date.parse(b.start_ts_utc) - Date.parse(a.start_ts_utc)
+      );
+      if (sortedValids[0]) {
+        void selectActivity(sortedValids[0]);
+      } else {
+        void selectActivity(null);
+      }
+    }
+  }, [tab, selectedActivity, validActivities, selectActivity]);
+
   useEffect(() => {
     const allowed = new Set(filtered.map((a) => a.id));
     setCompareIds((prev) => {
@@ -465,7 +536,7 @@ export function Dashboard({ onLogout }: Props) {
 
   const overviewRecords = useMemo(() => {
     if (tab !== "overview") return [];
-    return filtered
+    return validFiltered
       .filter((a) => typeof a.start_latitude === "number" && typeof a.start_longitude === "number")
       .map((a) => {
         const ts = parseUtcDate(a.start_ts_utc).getTime();
@@ -473,9 +544,14 @@ export function Dashboard({ onLogout }: Props) {
           timestamp_ms: Number.isFinite(ts) ? ts : 0,
           latitude: a.start_latitude,
           longitude: a.start_longitude,
+          activity_name: a.activity_name || a.file_name,
+          sport: a.sport,
+          distance_m: a.distance_m,
+          duration_s: a.duration_s,
+          start_ts_utc: a.start_ts_utc,
         } as RecordPoint;
       });
-  }, [tab, filtered]);
+  }, [tab, validFiltered]);
 
   const sports = Array.from(new Set(activities.map((a) => a.sport).filter(Boolean)));
   const filteredSports = Array.from(new Set(filtered.map((a) => a.sport).filter(Boolean)));
@@ -483,12 +559,12 @@ export function Dashboard({ onLogout }: Props) {
   const selectedRecords = tab === "overview" ? overviewRecords : records;
   const distanceDivisorValue = distanceDivisor(distanceUnit);
   const distanceSuffix = distanceLabel(distanceUnit);
-  const filteredTotalDistanceM = filtered.reduce((sum, a) => sum + a.distance_m, 0);
-  const filteredTotalDurationS = filtered.reduce((sum, a) => sum + a.duration_s, 0);
+  const filteredTotalDistanceM = validFiltered.reduce((sum, a) => sum + a.distance_m, 0);
+  const filteredTotalDurationS = validFiltered.reduce((sum, a) => sum + a.duration_s, 0);
   const totalDistance = filteredTotalDistanceM / distanceDivisorValue;
   const totalDuration = filteredTotalDurationS;
-  const avgDistance = filtered.length ? totalDistance / filtered.length : 0;
-  const avgDuration = filtered.length ? totalDuration / filtered.length : 0;
+  const avgDistance = validFiltered.length ? totalDistance / validFiltered.length : 0;
+  const avgDuration = validFiltered.length ? totalDuration / validFiltered.length : 0;
   const recordStats = useMemo(() => computeRecordStats(records), [records]);
 
   function formatDate(input: string): string {
@@ -1052,6 +1128,17 @@ export function Dashboard({ onLogout }: Props) {
     if (avgHr && avgHr > 0) push("avg_hr", t("detail.avgHr"), `${Math.round(avgHr)} bpm`, "heart", avgPaceText !== "-" ? `${t("detail.pace")} ${avgPaceText}` : undefined);
     if (maxHr && maxHr > 0) push("max_hr", t("detail.maxHr"), `${Math.round(maxHr)} bpm`, "heart");
 
+    const hrr = analyzeHeartRateRecovery(records);
+    if (hrr.hrDrop1Min && hrr.hrDrop1Min > 0) {
+      push(
+        "hrr",
+        "HR Recovery (1m)",
+        `-${hrr.hrDrop1Min} bpm`,
+        "heart",
+        `Rating: ${hrr.rating1Min || "Good"}`
+      );
+    }
+
     if (recordStats.maxAlt > 0) push("max_alt", t("detail.maxAltitude"), `${convertElevationMeters(recordStats.maxAlt, distanceUnit).toFixed(0)} ${elevationLabel(distanceUnit)}`, "mountain");
     if (recordStats.avgPower > 0) push("avg_power", t("detail.avgPower"), `${Math.round(recordStats.avgPower)} W`, "power");
 
@@ -1120,10 +1207,10 @@ export function Dashboard({ onLogout }: Props) {
             <div className="brand-icon"><img src={appIcon} alt="FIT Dashboard" className="brand-icon-img" /></div>
             <div className="brand-text">
               <h1>
-                FIT Dashboard
+                HC Road to Sub 3.30
                 {supporterBadge && <span className="supporter-badge-inline" title="Supporter Badge Active">{t("header.supporter")}</span>}
               </h1>
-              <span>{t("header.workoutLogAnalytics")}</span>
+              <span>No Excuses!</span>
             </div>
           </div>
         </div>
@@ -1132,6 +1219,9 @@ export function Dashboard({ onLogout }: Props) {
             <button id="tab-overview" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>{t("header.overview")}</button>
             <button id="tab-individual" className={tab === "individual" ? "active" : ""} onClick={() => setTab("individual")}>{t("header.individual")}</button>
             <button id="tab-compare" className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>{t("header.compare")}</button>
+            <button id="tab-analytics" className={tab === "analytics" ? "active" : ""} onClick={() => setTab("analytics")}>Readiness & Load</button>
+            <button id="tab-personal-bests" className={tab === "personal-bests" ? "active" : ""} onClick={() => setTab("personal-bests")}>Personal Bests</button>
+            <button id="tab-scheduler" className={tab === "scheduler" ? "active" : ""} onClick={() => setTab("scheduler")}>Scheduler</button>
           </div>
         </div>
         <div className="header-right">
@@ -1462,7 +1552,14 @@ export function Dashboard({ onLogout }: Props) {
                           }}
                           onContextMenu={(e) => onItemContextMenu(e, a)}
                         >
-                          <span className="activity-name">{a.activity_name || a.file_name}</span>
+                          <span className="activity-name">
+                             {a.activity_name || a.file_name}
+                             {!isValidActivity(a) && (
+                               <span className="gps-warmup-badge" style={{ marginLeft: "6px", fontSize: "9px", padding: "1px 5px", borderRadius: "4px", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", fontWeight: "bold" }} title="Accidental log or GPS glitch, excluded from training load & PRs">
+                                 ⚠️ GPS Warmup
+                               </span>
+                             )}
+                          </span>
                           <div className="activity-meta-rows">
                             <div className="activity-meta-row" style={{ color: "var(--text-muted)", marginBottom: "4px" }}>
                               <span>{formatDateShort(a.start_ts_utc)} &bull; {formatTimeShort(a.start_ts_utc)}</span>
@@ -1515,11 +1612,6 @@ export function Dashboard({ onLogout }: Props) {
 
         {/* ── Main Content ───────────────────────────────────── */}
         <main className="main-content">
-          <DonationBanner
-            supporterBadge={supporterBadge}
-            dismissed={bannerDismissed}
-            onDismiss={() => setBannerDismissed(true)}
-          />
 
           {tab === "overview" ? (
             activities.length === 0 ? (
@@ -1529,34 +1621,122 @@ export function Dashboard({ onLogout }: Props) {
               </div>
             ) : (
             <>
-              <div className="stats-row">
-                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{filtered.length}</div><div className="stat-label">{t("overview.filteredActivities")}</div></div>
+              <div className="stats-row" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "1rem" }}>
+                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{validFiltered.length}</div><div className="stat-label">{t("overview.filteredActivities")}</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconDistance /></div><div className="stat-value">{totalDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">{t("overview.totalDistance")}</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDuration(totalDuration)}</div><div className="stat-label">{t("overview.totalDuration")}</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconSport /></div><div className="stat-value">{filteredSports.length}</div><div className="stat-label">{t("overview.uniqueSports")}</div></div>
-              </div>
-              <div className="stats-row">
                 <div className="stat-card"><div className="stat-icon"><IconAvg /></div><div className="stat-value">{avgDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">{t("overview.avgDistancePerActivity")}</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">{t("overview.avgDurationPerActivity")}</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">{t("overview.devices")}</div></div>
               </div>
-              <div className="overview-contribution-row">
-                <div className="overview-contribution-main">
-                  <ActivityContributionHeatmap activities={filtered} />
+              <OverviewGoalAndEvent activities={validFiltered} distanceUnit={distanceUnit} />
+              
+              {/* Dynamic Pinned Overview Widgets Section */}
+              {pinnedWidgets.length > 0 && (
+                <div className="pinned-widgets-section animate-fade-in">
+                  <div className="pinned-widget-header">
+                    <span style={{ fontSize: "1.3rem" }}>📌</span>
+                    <h3 style={{ margin: 0, fontSize: "1.1rem", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-secondary)" }}>
+                      Pinned Overview Widgets
+                    </h3>
+                  </div>
+                  
+                  {pinnedWidgets.includes("load-chart") && (
+                    <LoadChart 
+                      activities={validFiltered} 
+                      theme={theme} 
+                      pinnedWidgets={pinnedWidgets} 
+                      togglePinWidget={togglePinWidget} 
+                    />
+                  )}
+
+                  {(pinnedWidgets.includes("vo2max") || pinnedWidgets.includes("personal-records") || pinnedWidgets.includes("race-predictor")) && (
+                    <PersonalBests 
+                      activities={validFiltered} 
+                      distanceUnit={distanceUnit} 
+                      theme={theme} 
+                      pinnedWidgets={pinnedWidgets} 
+                      togglePinWidget={togglePinWidget} 
+                      onlyPinned={true} 
+                    />
+                  )}
                 </div>
-                <div className="overview-contribution-side">
-                  <OverviewSportTypeDonut activities={filtered} theme={theme} />
+              )}
+
+              <div className="overview-contribution-row" style={{ display: "block", width: "100%" }}>
+                <div className="overview-contribution-main" style={{ width: "100%" }}>
+                  <ActivityContributionHeatmap activities={validFiltered} />
                 </div>
               </div>
               <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
-              <OverviewWeeklyTrend activities={filtered} distanceUnit={distanceUnit} theme={theme} />
+              <OverviewWeeklyTrend activities={validFiltered} distanceUnit={distanceUnit} theme={theme} />
               <OverviewActivityTable activities={filtered} distanceUnit={distanceUnit} timeFormat={timeFormat} />
             </>
             )
           ) : tab === "compare" ? (
             <CompareCharts compareIds={compareIds} activities={activities} theme={theme} distanceUnit={distanceUnit} />
+          ) : tab === "analytics" ? (
+            <div className="analytics-tab-grid" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+              <ReadinessTracker activities={validActivities} theme={theme} />
+              <LoadChart 
+                activities={validActivities} 
+                theme={theme} 
+                pinnedWidgets={pinnedWidgets} 
+                togglePinWidget={togglePinWidget} 
+              />
+              
+              {/* Active Workout Selector Banner */}
+              <div className="active-workout-selector-panel glass-card" style={{ padding: "1.25rem 1.5rem", border: "1px solid var(--border)", borderRadius: "12px", background: "rgba(100, 140, 220, 0.02)", textAlign: "left" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>
+                      Active Telemetry Source
+                    </span>
+                    <h4 style={{ margin: "0.25rem 0 0 0", fontSize: "1.1rem" }}>
+                      {selectedActivity ? (
+                        <>📊 {selectedActivity.activity_name || selectedActivity.file_name} <small style={{ color: "var(--text-muted)", fontWeight: "normal" }}>({formatDate(selectedActivity.start_ts_utc)})</small></>
+                      ) : (
+                        "🔍 No workout selected for individual telemetry analysis"
+                      )}
+                    </h4>
+                  </div>
+                  
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Switch workout:</span>
+                    <select
+                      value={selectedActivity?.id ?? ""}
+                      onChange={(e) => {
+                        const id = Number(e.target.value);
+                        const found = validActivities.find(a => a.id === id);
+                        if (found) void selectActivity(found);
+                      }}
+                      style={{ padding: "0.4rem 0.75rem", borderRadius: "6px", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text)", fontSize: "12px" }}
+                    >
+                      <option value="" disabled>-- Select a Workout --</option>
+                      {validActivities.slice(0, 15).map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.sport?.toLowerCase() === "running" ? "🏃" : a.sport?.toLowerCase() === "cycling" ? "🚴" : "🏋️"} {a.activity_name || a.file_name} ({a.start_ts_utc.slice(0, 10)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <PowerCurve records={records} theme={theme} />
+              <BiomechanicalCharts records={records} theme={theme} isRunning={selectedActivity?.sport?.toLowerCase() === "running"} distanceUnit={distanceUnit} />
+            </div>
+          ) : tab === "personal-bests" ? (
+            <PersonalBests 
+              activities={validActivities} 
+              distanceUnit={distanceUnit} 
+              theme={theme} 
+              pinnedWidgets={pinnedWidgets} 
+              togglePinWidget={togglePinWidget} 
+            />
+          ) : tab === "scheduler" ? (
+            <TrainingScheduler activities={validActivities} theme={theme} distanceUnit={distanceUnit} />
           ) : selectedActivity ? (
-            <>
+            <div key={selectedActivity.id} className="activity-detail-fade">
               <div className="detail-header">
                 <div className="detail-title-row">
                   <h2>{selectedActivity.activity_name || selectedActivity.file_name}</h2>
@@ -1601,10 +1781,29 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
-                <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
+                <div className="panel">
+                  <h3>{t("detail.heartRateAndPace")}</h3>
+                  {records.length === 0 ? (
+                    <div className="skeleton-shimmer skeleton-chart-panel" />
+                  ) : (
+                    <ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+                  )}
+                </div>
+                {records.length === 0 ? (
+                  <div className="skeleton-shimmer skeleton-map-panel" />
+                ) : (
+                  <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
+                )}
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              {records.length === 0 ? (
+                <div className="skeleton-insights">
+                  <div className="skeleton-shimmer skeleton-insight-card" />
+                  <div className="skeleton-shimmer skeleton-insight-card" />
+                  <div className="skeleton-shimmer skeleton-insight-card" />
+                </div>
+              ) : (
+                <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              )}
               {lapRows.length > 0 && (
                 <div className="panel laps-table-panel">
                   <h3>{t("detail.laps")}</h3>
@@ -1686,7 +1885,7 @@ export function Dashboard({ onLogout }: Props) {
                   </div>
                 </div>
               )}
-            </>
+            </div>
           ) : (
             <div className="empty-state">
               <span className="empty-icon"><IconBarChart size={40} /></span>

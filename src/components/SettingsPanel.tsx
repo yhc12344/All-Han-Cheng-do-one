@@ -56,12 +56,14 @@ export function SettingsPanel({ appVersion, versionBadgeStatus }: Props) {
     timeFormat,
     mapStyle,
     supporterBadge,
+    geminiApiKey,
     setTheme,
     setDistanceUnit,
     setTimeFormat,
     setMapStyle,
     verifySupporterCode,
     removeSupporterBadge,
+    setGeminiApiKey,
     toggleSettings
   } = useSettingsStore();
   const setLanguage = useSettingsStore((s) => s.setLanguage);
@@ -173,6 +175,17 @@ export function SettingsPanel({ appVersion, versionBadgeStatus }: Props) {
               <option value="topo">{t("settings.mapTopo")}</option>
               <option value="satellite">{t("settings.mapSatellite")}</option>
             </select>
+          </label>
+
+          <label><span>Gemini API Key</span>
+            <input 
+              type="password" 
+              placeholder={import.meta.env.VITE_GEMINI_API_KEY ? "Loaded from .env" : "Enter API Key"}
+              disabled={!!import.meta.env.VITE_GEMINI_API_KEY}
+              value={import.meta.env.VITE_GEMINI_API_KEY ? "" : geminiApiKey} 
+              onChange={(e) => setGeminiApiKey(e.target.value)} 
+              className="settings-input"
+            />
           </label>
         </div>
 

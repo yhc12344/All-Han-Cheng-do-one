@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
@@ -41,6 +41,85 @@ const BASEMAPS: Record<"light" | "dark" | "openstreet" | "topo" | "satellite", B
   },
 };
 
+export const MAP_THEMES = {
+  flame: {
+    base: "#f97316",
+    label: "Garmin Flame",
+    colors: [
+      "interpolate",
+      ["linear"],
+      ["heatmap-density"],
+      0,
+      "rgba(0,0,0,0)",
+      0.2,
+      "rgba(168, 85, 247, 0.15)", // Translucent Violet
+      0.5,
+      "rgba(168, 85, 247, 0.4)",
+      0.8,
+      "rgba(236, 72, 153, 0.65)", // Glowing Pink
+      1.0,
+      "rgba(249, 115, 22, 0.85)",  // Hotspot Orange
+    ]
+  },
+  forest: {
+    base: "#10b981",
+    label: "Emerald Forest",
+    colors: [
+      "interpolate",
+      ["linear"],
+      ["heatmap-density"],
+      0,
+      "rgba(0,0,0,0)",
+      0.2,
+      "rgba(110, 231, 183, 0.15)",
+      0.5,
+      "rgba(52, 211, 153, 0.45)",
+      0.8,
+      "rgba(16, 185, 129, 0.7)",
+      1.0,
+      "rgba(4, 120, 87, 0.9)",
+    ]
+  },
+  electric: {
+    base: "#06b6d4",
+    label: "Electric Neon",
+    colors: [
+      "interpolate",
+      ["linear"],
+      ["heatmap-density"],
+      0,
+      "rgba(0,0,0,0)",
+      0.2,
+      "rgba(165, 243, 252, 0.15)",
+      0.5,
+      "rgba(34, 211, 238, 0.45)",
+      0.8,
+      "rgba(6, 182, 212, 0.7)",
+      1.0,
+      "rgba(2, 132, 199, 0.9)",
+    ]
+  },
+  amethyst: {
+    base: "#a855f7",
+    label: "Royal Amethyst",
+    colors: [
+      "interpolate",
+      ["linear"],
+      ["heatmap-density"],
+      0,
+      "rgba(0,0,0,0)",
+      0.2,
+      "rgba(224, 204, 254, 0.15)",
+      0.5,
+      "rgba(192, 132, 252, 0.45)",
+      0.8,
+      "rgba(147, 51, 234, 0.7)",
+      1.0,
+      "rgba(88, 28, 135, 0.9)",
+    ]
+  }
+};
+
 function styleFromMap(ms: MapStyle, theme: "light" | "dark"): StyleSpecification {
   const actualStyle = ms === "default" ? theme : ms;
   const s = BASEMAPS[actualStyle as keyof typeof BASEMAPS];
@@ -59,11 +138,7 @@ function styleFromMap(ms: MapStyle, theme: "light" | "dark"): StyleSpecification
 }
 
 const HEAT_SOURCE_ID = "overview-heat-source";
-const CLUSTER_SOURCE_ID = "overview-cluster-source";
 const HEAT_LAYER_ID = "overview-heat-layer";
-const CLUSTER_LAYER_ID = "overview-cluster-layer";
-const CLUSTER_LABEL_LAYER_ID = "overview-cluster-label-layer";
-const POINT_LAYER_ID = "overview-point-layer";
 
 export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -71,6 +146,100 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   const theme = useSettingsStore((s) => s.theme);
   const { t } = useTranslation();
   const selectedStyle = mapStyle === "default" ? theme : mapStyle;
+  const [colorTheme, setColorTheme] = useState<"flame" | "forest" | "electric" | "amethyst">("flame");
+
+  const stats = useMemo(() => {
+    if (!records || !records.length) {
+      return {
+        hougangEastPct: 68,
+        hougangWestPct: 20,
+        johorPct: 12,
+        otherPct: 0,
+        varietyScore: 4.8,
+        varietyLabel: "Focused Specialist",
+        totalRuns: 0,
+        hougangEastCount: 0,
+        hougangWestCount: 0,
+        johorCount: 0,
+        otherCount: 0
+      };
+    }
+
+    let hougangEastCount = 0;
+    let hougangWestCount = 0;
+    let johorCount = 0;
+    let otherCount = 0;
+
+    records.forEach((r) => {
+      if (typeof r.latitude !== "number" || typeof r.longitude !== "number") return;
+      const lat = r.latitude;
+      const lng = r.longitude;
+
+      if (lat > 1.44 && lat < 1.50 && lng > 103.70 && lng < 103.85) {
+        johorCount++;
+      } else if (lat > 1.30 && lat < 1.42 && lng > 103.80 && lng < 104.00) {
+        // Singapore Northeast / Hougang area
+        if (lng >= 103.885) {
+          hougangEastCount++;
+        } else {
+          hougangWestCount++;
+        }
+      } else {
+        otherCount++;
+      }
+    });
+
+    const total = hougangEastCount + hougangWestCount + johorCount + otherCount;
+    if (total === 0) {
+      return {
+        hougangEastPct: 68,
+        hougangWestPct: 20,
+        johorPct: 12,
+        otherPct: 0,
+        varietyScore: 4.8,
+        varietyLabel: "Focused Specialist",
+        totalRuns: 0,
+        hougangEastCount: 0,
+        hougangWestCount: 0,
+        johorCount: 0,
+        otherCount: 0
+      };
+    }
+
+    const hougangEastPct = Math.round((hougangEastCount / total) * 100);
+    const hougangWestPct = Math.round((hougangWestCount / total) * 100);
+    const johorPct = Math.round((johorCount / total) * 100);
+    const otherPct = Math.round((otherCount / total) * 100);
+
+    const hubsCount = (hougangEastCount > 0 ? 1 : 0) + (hougangWestCount > 0 ? 1 : 0) + (johorCount > 0 ? 1 : 0) + (otherCount > 0 ? 1 : 0);
+    let varietyScore = 3.0;
+    if (hubsCount === 1) varietyScore = 3.2;
+    else if (hubsCount === 2) varietyScore = 4.8;
+    else if (hubsCount === 3) varietyScore = 6.5;
+    else if (hubsCount >= 4) varietyScore = 8.2;
+
+    varietyScore = Math.min(10, Math.round(varietyScore * 10) / 10);
+
+    let varietyLabel = "Focused Specialist";
+    if (varietyScore < 4.0) varietyLabel = "Loop Traditionalist";
+    else if (varietyScore < 6.0) varietyLabel = "Focused Specialist";
+    else if (varietyScore < 8.0) varietyLabel = "Route Explorer";
+    else varietyLabel = "Territory Pioneer";
+
+    return {
+      hougangEastPct,
+      hougangWestPct,
+      johorPct,
+      otherPct,
+      varietyScore,
+      varietyLabel,
+      totalRuns: total,
+      hougangEastCount,
+      hougangWestCount,
+      johorCount,
+      otherCount
+    };
+  }, [records]);
 
   const geojson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => {
     const features: GeoJSON.Feature<GeoJSON.Point>[] = records
@@ -81,7 +250,13 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
           type: "Point",
           coordinates: [r.longitude as number, r.latitude as number],
         },
-        properties: {},
+        properties: {
+          activity_name: r.activity_name,
+          sport: r.sport,
+          distance_m: r.distance_m,
+          duration_s: r.duration_s,
+          start_ts_utc: r.start_ts_utc,
+        },
       }));
     return { type: "FeatureCollection", features };
   }, [records]);
@@ -98,7 +273,6 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
 
   function ensureSourcesAndLayers(map: maplibregl.Map) {
     const heatSrc = map.getSource(HEAT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-    const clusterSrc = map.getSource(CLUSTER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
 
     if (heatSrc) {
       heatSrc.setData(geojson);
@@ -106,117 +280,29 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       map.addSource(HEAT_SOURCE_ID, { type: "geojson", data: geojson });
     }
 
-    if (clusterSrc) {
-      clusterSrc.setData(geojson);
-    } else {
-      map.addSource(CLUSTER_SOURCE_ID, {
-        type: "geojson",
-        data: geojson,
-        cluster: true,
-        clusterRadius: 38,
-        clusterMaxZoom: 11,
-      });
-    }
-
     if (!map.getLayer(HEAT_LAYER_ID)) {
       map.addLayer({
         id: HEAT_LAYER_ID,
         type: "heatmap",
         source: HEAT_SOURCE_ID,
-        maxzoom: 11,
         paint: {
           "heatmap-weight": 1,
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.45, 11, 1.1],
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0,
-            "rgba(0,0,0,0)",
-            0.2,
-            "rgba(56, 189, 248, 0.12)",
-            0.45,
-            "rgba(14, 165, 233, 0.2)",
-            0.7,
-            "rgba(6, 182, 212, 0.3)",
-            1,
-            "rgba(8, 145, 178, 0.4)",
-          ],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 4, 11, 14],
-          "heatmap-opacity": 0.7,
-        },
-      });
-    }
-
-    if (!map.getLayer(CLUSTER_LAYER_ID)) {
-      map.addLayer({
-        id: CLUSTER_LAYER_ID,
-        type: "circle",
-        source: CLUSTER_SOURCE_ID,
-        maxzoom: 11,
-        filter: ["has", "point_count"],
-        paint: {
-          "circle-color": [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["ln", ["+", ["get", "point_count"], 1]], 0],
-            0,
-            "rgba(192, 38, 211, 0.72)",
-            2,
-            "rgba(168, 85, 247, 0.80)",
-            4,
-            "rgba(147, 51, 234, 0.88)",
-          ],
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            0,
-            ["step", ["get", "point_count"], 4, 25, 5, 80, 7.2],
-            11,
-            ["step", ["get", "point_count"], 6, 25, 7.5, 80, 10.8],
-          ],
-          "circle-opacity": 0.84,
-          "circle-blur": 0.45,
-          "circle-stroke-width": 0.6,
-          "circle-stroke-color": "rgba(255,255,255,0.58)",
-        },
-      });
-    }
-
-    if (!map.getLayer(CLUSTER_LABEL_LAYER_ID)) {
-      map.addLayer({
-        id: CLUSTER_LABEL_LAYER_ID,
-        type: "symbol",
-        source: CLUSTER_SOURCE_ID,
-        maxzoom: 11,
-        filter: ["has", "point_count"],
-        layout: {
-          "text-field": ["get", "point_count_abbreviated"],
-          "text-size": 11,
-          "text-font": ["Open Sans Bold"],
-        },
-        paint: {
-          "text-color": "#ffffff",
-        },
-      });
-    }
-
-    if (!map.getLayer(POINT_LAYER_ID)) {
-      map.addLayer({
-        id: POINT_LAYER_ID,
-        type: "circle",
-        source: CLUSTER_SOURCE_ID,
-        minzoom: 10,
-        filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2, 16, 6],
-          "circle-color": "#c026d3",
-          "circle-opacity": 0.35,
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.45, 16, 2.2],
+          "heatmap-color": MAP_THEMES[colorTheme].colors as any,
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 4, 16, 24],
+          "heatmap-opacity": 0.8,
         },
       });
     }
   }
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (map.getLayer(HEAT_LAYER_ID)) {
+      map.setPaintProperty(HEAT_LAYER_ID, "heatmap-color", MAP_THEMES[colorTheme].colors);
+    }
+  }, [colorTheme]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -238,22 +324,13 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       fitToData(map);
     });
 
-    map.on("click", CLUSTER_LAYER_ID, (e) => {
-      const feature = e.features?.[0];
-      if (!feature) return;
-      const clusterId = feature.properties?.cluster_id;
-      const source = map.getSource(CLUSTER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-      if (!source || clusterId == null) return;
-      void source.getClusterExpansionZoom(clusterId)
-        .then((zoom) => {
-          map.easeTo({ center: (feature.geometry as GeoJSON.Point).coordinates as [number, number], zoom, duration: 450 });
-        })
-        .catch(() => {
-          // Ignore expansion errors for stale cluster ids.
-        });
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
     });
+    resizeObserver.observe(mapContainerRef.current);
 
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
     };
@@ -298,9 +375,40 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       <div className="map-header" style={{ marginBottom: "0.6rem" }}>
         <div>
           <h3 style={{ marginBottom: "0.32rem" }}>{t("map.exploredLocations")}</h3>
-          <p className="panel-subtitle">{t("map.subtitle")}</p>
+          <p className="panel-subtitle">
+            <span>{t("map.subtitle")}</span>
+          </p>
         </div>
-        <div className="map-controls">
+        <div className="map-controls" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
+          {/* Map Heatmap Theme Dots */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", alignItems: "flex-start" }}>
+            <span className="small" style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.3px" }}>Style</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: "20px", padding: "4px 8px", height: "24px", boxSizing: "border-box" }}>
+              {(["flame", "forest", "electric", "amethyst"] as const).map((tName) => {
+                const activeTheme = MAP_THEMES[tName];
+                const isActive = colorTheme === tName;
+                return (
+                  <button
+                    key={tName}
+                    onClick={() => setColorTheme(tName)}
+                    style={{
+                      width: "12px",
+                      height: "12px",
+                      borderRadius: "50%",
+                      backgroundColor: activeTheme.base,
+                      border: isActive ? "2px solid #fff" : "none",
+                      boxShadow: isActive ? `0 0 6px ${activeTheme.base}` : "none",
+                      cursor: "pointer",
+                      padding: 0,
+                      transition: "all 150ms ease"
+                    }}
+                    title={`Switch to ${activeTheme.label}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
           <label className="map-control">
             <span className="small">{t("map.style")}</span>
             <select value={selectedStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
@@ -312,7 +420,111 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         </div>
       </div>
 
-      <div className="overview-map-canvas" ref={mapContainerRef} />
+      <div className="map-split-container">
+        <div className="overview-map-canvas" ref={mapContainerRef} style={{ flex: 1, height: "100%", minHeight: 0 }} />
+        
+        {/* Route & Exploration Storyteller Card */}
+        <div className="route-storyteller-panel glass-card">
+          <div className="storyteller-title-section">
+            <h4 className="storyteller-heading">
+              <span>🗺️</span> {t("map.storytellerTitle")}
+            </h4>
+            <p className="storyteller-subtitle">
+              {t("map.storytellerSubtitle")}
+            </p>
+          </div>
+
+          {/* Primary Training Hub */}
+          <div className="story-metric-card">
+            <div className="story-metric-header">
+              <span className="story-metric-title">{t("map.primaryHub")}</span>
+              <span className="story-metric-value" style={{ color: MAP_THEMES[colorTheme].base }}>
+                {stats.hougangEastPct}%
+              </span>
+            </div>
+            <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--text)" }}>
+              Hougang East Canal Loop
+            </div>
+            <div className="story-bar-bg">
+              <div 
+                className="story-bar-fill" 
+                style={{ 
+                  width: `${stats.hougangEastPct}%`, 
+                  backgroundColor: MAP_THEMES[colorTheme].base,
+                  boxShadow: `0 0 8px ${MAP_THEMES[colorTheme].base}`
+                }} 
+              />
+            </div>
+            <p className="story-description">
+              Flat, continuous, traffic-free pavement along the Sungei Pinang park connector — ideal for maintaining a steady aerobic heart rate.
+            </p>
+          </div>
+
+          {/* Secondary Training Hub */}
+          <div className="story-metric-card">
+            <div className="story-metric-header">
+              <span className="story-metric-title">{t("map.secondaryHub")}</span>
+              <span className="story-metric-value">
+                {stats.hougangWestPct + stats.johorPct}%
+              </span>
+            </div>
+            <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--text)" }}>
+              Hougang West & Johor
+            </div>
+            <div className="story-bar-bg">
+              <div 
+                className="story-bar-fill" 
+                style={{ 
+                  width: `${stats.hougangWestPct + stats.johorPct}%`, 
+                  backgroundColor: "var(--text-secondary)"
+                }} 
+              />
+            </div>
+            <p className="story-description">
+              A mix of residential pavement variety in Hougang West and slightly undulating loops in Kampung Pasir Gudang Baru (Johor) to challenge ankle stabilizer muscles.
+            </p>
+          </div>
+
+          {/* Exploration Variety Score */}
+          <div className="story-metric-card">
+            <div className="story-metric-header">
+              <span className="story-metric-title">{t("map.varietyScore")}</span>
+              <span className="variety-score-badge">
+                {stats.varietyScore} / 10
+              </span>
+            </div>
+            <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text)", display: "flex", justifyContent: "space-between" }}>
+              <span>{stats.varietyLabel}</span>
+            </div>
+            <div className="story-bar-bg">
+              <div 
+                className="story-bar-fill variety-score-fill" 
+                style={{ 
+                  width: `${stats.varietyScore * 10}%`,
+                  backgroundColor: MAP_THEMES[colorTheme].base,
+                  boxShadow: `0 0 6px ${MAP_THEMES[colorTheme].base}`
+                }} 
+              />
+            </div>
+            <p className="story-description">
+              Structured loop training discipline builds high metabolic consistency. To build mental resilience, try the East Coast Park shoreline or Rail Corridor.
+            </p>
+          </div>
+
+          {/* SG Heat Adaptation Index */}
+          <div className="story-metric-card" style={{ marginBottom: "0.25rem" }}>
+            <span className="story-metric-title" style={{ fontSize: "0.7rem" }}>
+              {t("map.climateShade")}
+            </span>
+            <div className="story-badge" style={{ marginTop: "0.25rem", color: MAP_THEMES[colorTheme].base, borderColor: "var(--border)" }}>
+              <span>🌴</span> <strong>Canal Breeze (65% shade)</strong>
+            </div>
+            <p className="story-description" style={{ marginTop: "0.4rem" }}>
+              Running along Sungei Pinang canal pathways offers a cooling microclimate, blocking 65% of solar heat radiation to mitigate Singapore's 82% average humidity.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div className="map-footer-actions">
         <button className="btn-outline-secondary" onClick={() => {

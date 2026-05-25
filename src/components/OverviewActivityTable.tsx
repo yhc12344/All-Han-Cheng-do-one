@@ -3,6 +3,7 @@ import type { Activity } from "../types";
 import { useSettingsStore } from "../stores/settingsStore";
 import { distanceDivisor, distanceLabel, speedLabel, type DistanceUnit } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import { isValidActivity } from "../lib/analytics";
 
 type Props = {
   activities: Activity[];
@@ -22,6 +23,7 @@ type TableRow = {
   maxHr: number | null;
   avgHr: number | null;
   avgCadence: number | null;
+  isValid: boolean;
 };
 
 const PAGE_SIZE = 10;
@@ -91,6 +93,8 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
         const avgHr = typeof session.avg_heart_rate === "number" ? session.avg_heart_rate : null;
         const avgCadence = typeof session.avg_cadence === "number" ? session.avg_cadence : null;
 
+        const isValid = isValidActivity(activity);
+
         return {
           id: activity.id,
           date,
@@ -103,6 +107,7 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
           maxHr,
           avgHr,
           avgCadence,
+          isValid,
         };
       })
       .filter((row): row is TableRow => row !== null)
@@ -184,7 +189,14 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
                   minute: "2-digit",
                   hour12: timeFormat === "12h",
                 })}</td>
-                <td className="overview-activity-table-name">{row.name}</td>
+                <td className="overview-activity-table-name">
+                  {row.name}
+                  {!row.isValid && (
+                    <span className="gps-warmup-badge" style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 6px", borderRadius: "4px", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", fontWeight: "bold" }} title="Accidental log or GPS glitch, excluded from training load & PRs">
+                      ⚠️ GPS Warmup
+                    </span>
+                  )}
+                </td>
                 <td>{row.sport}</td>
                 <td>{formatDuration(row.durationS)}</td>
                 <td>{(row.distanceM / distanceDivisor(distanceUnit)).toFixed(2)} {distanceLabel(distanceUnit)}</td>

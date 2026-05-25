@@ -1,9 +1,10 @@
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import type { Activity, RecordPoint } from "../types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../lib/api";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
-import { convertElevationMeters, convertSpeedMps, elevationLabel, speedLabel, type DistanceUnit } from "../lib/units";
+import { convertDistanceMeters, convertElevationMeters, convertSpeedMps, elevationLabel, speedLabel, type DistanceUnit } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
 
 type Props = {
@@ -11,6 +12,8 @@ type Props = {
   activities: Activity[];
   theme: "light" | "dark";
   distanceUnit: DistanceUnit;
+  isSidebarCollapsed?: boolean;
+  onOpenSidebar?: () => void;
 };
 
 // Format MM:SS or HH:MM:SS
@@ -31,20 +34,26 @@ const formatLegendDateTime = (rawUtc: string) => {
   const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(normalized);
   const date = new Date(hasZone ? normalized : `${normalized}Z`);
   if (Number.isNaN(date.getTime())) return rawUtc;
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  
+  const day = date.getDate();
+  const month = date.toLocaleString("en-US", { month: "short" });
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${day} ${month}, ${hh}:${mm}`;
 };
 
-export function CompareCharts({ compareIds, activities, theme, distanceUnit }: Props) {
+export function CompareCharts({ compareIds, activities, theme, distanceUnit, isSidebarCollapsed, onOpenSidebar }: Props) {
   const [loading, setLoading] = useState(false);
   const [dataSets, setDataSets] = useState<{ name: string; records: RecordPoint[] }[]>([]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
   const { t } = useTranslation();
+
+  const chartInstancesRef = useRef<any[]>([]);
+  const isDispatchingRef = useRef(false);
+
+  useEffect(() => {
+    chartInstancesRef.current = [];
+  }, [compareIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,9 +67,11 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
         const results = await Promise.all(
           compareIds.map(async (id) => {
             const act = activities.find(a => a.id === id);
-            const baseName = act?.activity_name || act?.file_name || `Activity ${id}`;
             const dateLabel = act?.start_ts_utc ? formatLegendDateTime(act.start_ts_utc) : `#${id}`;
-            const name = `${baseName} — ${dateLabel}`;
+            const distVal = act?.distance_m 
+              ? convertDistanceMeters(act.distance_m, distanceUnit).toFixed(1) + (distanceUnit === "mi" ? "mi" : "km")
+              : "";
+            const name = distVal ? `${dateLabel} (${distVal})` : dateLabel;
             const records = await api.getRecords(id, 45_000).catch(() => []);
             return { name, records };
           })
@@ -76,8 +87,30 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
 
   if (compareIds.length === 0) {
     return (
-      <div className="empty-state">
-        <span>{t("compare.selectActivities")}</span>
+      <div className="empty-state" style={{ display: "flex", flexDirection: "column", gap: "1.25rem", alignItems: "center", justifyContent: "center", padding: "4rem 2rem", textAlign: "center" }}>
+        <span style={{ fontSize: "15px", color: "var(--text-secondary)", maxWidth: "480px", lineHeight: "1.5" }}>
+          {t("compare.selectActivities")}
+        </span>
+        {isSidebarCollapsed && onOpenSidebar && (
+          <button 
+            className="btn-accent" 
+            onClick={onOpenSidebar}
+            style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "8px", 
+              padding: "0.6rem 1.25rem", 
+              borderRadius: "8px", 
+              fontWeight: "600",
+              fontSize: "13px",
+              cursor: "pointer",
+              boxShadow: "0 4px 12px var(--accent-glow)",
+              transition: "transform 150ms ease"
+            }}
+          >
+            📂 {t("sidebar.expandSidebar")}
+          </button>
+        )}
       </div>
     );
   }
@@ -115,8 +148,8 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
 
   const createOption = (title: string, yAxisName: string, key: keyof RecordPoint) => ({
     title: {
-      text: title,
-      textStyle: { color: tooltipText, fontSize: 14, fontWeight: "500" },
+      text: `${title} (${yAxisName})`,
+      textStyle: { color: tooltipText, fontSize: 14, fontWeight: "600" },
       left: 16,
       top: 10,
     },
@@ -125,6 +158,14 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
       backgroundColor: tooltipBg,
       borderColor: tooltipBorder,
       textStyle: { color: tooltipText, fontSize: 12 },
+      axisPointer: {
+        type: "line",
+        lineStyle: {
+          color: isDark ? "rgba(148, 163, 184, 0.45)" : "rgba(71, 85, 105, 0.35)",
+          type: "dashed",
+          width: 1
+        }
+      },
       formatter: (params: any) => {
         if (!params.length) return "";
         const relTime = formatRelTime(params[0].value[0]);
@@ -142,8 +183,10 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
       textStyle: { color: axisColor, fontSize: 11 },
       right: 16,
       top: 10,
+      type: "scroll", // Premium scrolling support for multiple comparative runs
+      width: "65%",   // Restricts horizontal layout so it never overlaps the left title
     },
-    grid: { left: 48, right: 16, top: 40, bottom: 46 },
+    grid: { left: 48, right: 16, top: 42, bottom: 46 },
     xAxis: {
       type: "value",
       axisLabel: { 
@@ -156,8 +199,6 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
     },
     yAxis: {
       type: "value",
-      name: yAxisName,
-      nameTextStyle: { color: axisColor, fontSize: 11 },
       axisLabel: { color: axisColor, fontSize: 11 },
       splitLine: { lineStyle: { color: gridLine } },
     },
@@ -173,6 +214,86 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
     ],
     series: buildSeries(key),
   });
+
+  const registerChart = (instance: any, index: number) => {
+    enableChartWheelPageScroll(instance);
+    chartInstancesRef.current[index] = instance;
+
+    // Prevent duplicate event handlers
+    instance.off("updateAxisPointer");
+    instance.off("globalout");
+
+    // Multi-chart hover/tooltip synchronization logic
+    instance.on("updateAxisPointer", (params: any) => {
+      if (isDispatchingRef.current) return;
+      if (!params || !params.axesInfo || params.axesInfo.length === 0) return;
+      const xVal = params.axesInfo[0].value;
+      if (xVal === undefined || xVal === null) return;
+
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart || otherChart === instance) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+
+          try {
+            const option = otherChart.getOption();
+            if (!option || !option.series || !option.series.length) return;
+
+            const firstSeries = option.series[0];
+            if (!firstSeries || !firstSeries.data || !firstSeries.data.length) return;
+
+            const data = firstSeries.data;
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            for (let i = 0; i < data.length; i++) {
+              const pt = data[i];
+              const ptX = Array.isArray(pt) ? pt[0] : (pt?.value ? pt.value[0] : null);
+              if (ptX !== null && ptX !== undefined) {
+                const diff = Math.abs(ptX - xVal);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestIndex = i;
+                }
+              }
+            }
+
+            otherChart.dispatchAction({
+              type: "showTip",
+              seriesIndex: 0,
+              dataIndex: closestIndex,
+            });
+          } catch (e) {
+            // Suppress background sync errors on charts being disposed/re-rendered
+          }
+        });
+      } catch (err) {
+        console.error("Error synchronizing Compare charts hover:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
+
+    instance.on("globalout", () => {
+      if (isDispatchingRef.current) return;
+      isDispatchingRef.current = true;
+      try {
+        chartInstancesRef.current.forEach((otherChart) => {
+          if (!otherChart) return;
+          if (typeof otherChart.isDisposed === "function" && otherChart.isDisposed()) return;
+          try {
+            otherChart.dispatchAction({
+              type: "hideTip",
+            });
+          } catch (e) {}
+        });
+      } catch (err) {
+        console.error("Error hiding Compare charts tooltips:", err);
+      } finally {
+        isDispatchingRef.current = false;
+      }
+    });
+  };
 
   const zoomEvents = {
     datazoom: (evt: any) => {
@@ -192,10 +313,10 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
           {t("compare.resetZoom")}
         </button>
       </div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 3)} notMerge style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }
