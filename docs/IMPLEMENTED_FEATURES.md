@@ -96,11 +96,7 @@ This document provides a comprehensive summary of the elite-tier features, sport
 * **Planned Workouts**: Add future sessions (title, sport, distance, duration) for any day via a modal dialog. Persisted to `localStorage` under `fit_sched_planned`.
 * **Weekly Targets**: Configurable target distance (km/mi) and duration (hrs), persisted to `localStorage`.
 * **Completion Rings**: SVG progress rings on each week comparing actual vs. planned volume.
-* Navigates month-by-month with previous/next controls.
-
----
-
-## 🗺️ 8. Explored Locations Density Heatmap
+* Navigates m## 🗺️ 8. Explored Locations Density Heatmap (Pure Heatmap Focus)
 **File**: [OverviewLocationMap.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/OverviewLocationMap.tsx)
 
 * MapLibre GL heatmap layer fed from activity start GPS coordinates.
@@ -108,29 +104,66 @@ This document provides a comprehensive summary of the elite-tier features, sport
 * Intensity and radius scale smoothly with zoom level (0–16).
 * Supports 5 basemap styles: Light, Dark (CartoDB), OpenStreet, Topo, Satellite (Esri).
 * "Reset Zoom" button fits map bounds to all loaded coordinates.
+* **Streamlined UI**: Completely removed recommended suggested routes database, active selection states, map source layers, and sidebar selection UI panel to focus 100% on the density heatmap of actual explored running grounds with zero distractions and optimized rendering.
 
 ---
 
-## 📈 9. Activity Contribution Heatmap & Consistency Insights (Triple-Column UX)
+## 📈 9. Activity Contribution Heatmap & Consistency Insights (Premium 15px System)
 **File**: [ActivityContributionHeatmap.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/ActivityContributionHeatmap.tsx)
 
 * **Triple-Column Dashboard Row**: Gracefully fills wide horizontal space on desktop screens by splitting the panel into a beautifully balanced 3-column system:
   1. **Left: 365-Day Contribution Heatmap**: A GitHub-style activity grid (Sunday–Saturday columns) colored by daily activity frequency using a translucent-to-solid violet gradient (`#a855f7`).
-  2. **Middle: Consistency & Streak Insights**: A dedicated telemetry card computing year-round consistency metrics in real time:
+     - **Enlarged 15px Grid Tracks**: Upgraded to a stunning, larger `15px` cell size with a `36px` day label sidebar to ensure prominent legibility on large viewports.
+     - **Locked Grid Sizing**: Configured the grid wrapper's `minWidth` to `945px` to lock the layout into place and prevent cell compression under variable screen sizes, allowing seamless horizontal scrolling on narrow screens and beautiful center alignments on desktop.
+  2. **Middle: Consistency & Streak Insights (220px)**: A dedicated telemetry card computing year-round consistency metrics in real time:
      - **Athlete Consistency Rating**: Categorizes user status from `Active Base (1★)` to `Elite (5★)` dynamically using pastel-colored star badges matching their active days percentage.
      - **Streaks Counter**: Computes consecutive daily training streaks (both chronological `longestStreak` and `currentStreak` active days, properly preserving yesterday-to-today boundary offsets).
      - **Active Days Progress Tracker**: Displays active days count vs 365 days accompanied by a smooth, matching progress bar metric.
-  3. **Right: Dedicated Daily Activity Sidebar**: Displays rich, context-aware details of workouts for any specific day:
+     - **Layout Preservation**: Built with `flexShrink: 0` to prevent browser cell squishing under responsive resizing.
+  3. **Right: Dedicated Daily Activity Sidebar (280px)**: Displays rich, context-aware details of workouts for any specific day:
      - **Dynamic States**: Real-time state indicators (🔍 Hovering / 📌 Pinned / 📅 Today).
      - **Pinning Action**: Click to pin a day's workouts, hover other days to temporarily preview them, click clear to reset.
      - **Workout Badges**: Lists activity sport type emojis, customized names, distance, duration, and running average paces.
-* Horizontal scroll disabled (`overflowX: hidden`) for a clean, flat, premium presentation.
+     - **Layout Preservation**: Built with `flexShrink: 0` to prevent browser cell squishing under responsive resizing.
 
 ---
 
-## 🎨 10. Premium UI/UX Design & Layout System
+## 🫁 10. Waking Autonomic State & Gabbett's ACWR Indicator
+**Files**: [ReadinessTracker.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/ReadinessTracker.tsx), [analytics.ts](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/lib/analytics.ts)
+
+* **Dual Workload Dials**: Leveraged side-by-side premium circular SVG dials to overlay autonomic status:
+  1. **PRI Dial**: Displays daily waking readiness percentage.
+  2. **ACWR Dial**: Displays acute fatigue (7-day load EWMA) relative to chronic fitness (42-day load EWMA).
+* **Tim Gabbett physiological zones**: ACWR value is dynamically color-coded matching high-performance sports science:
+  - $< 0.80$ (Slate = Undertraining)
+  - $0.80 - 1.30$ (Emerald = Sweet-Spot / Safe Training)
+  - $1.30 - 1.50$ (Amber = Caution / High Risk)
+  - $> 1.50$ (Crimson = Injury Danger Zone)
+* **High Acute Load Warning Banner**: A dynamic warning banner displays at the top of the Overview dashboard if the ACWR exceeds the `1.30` threshold to advise the athlete to run easy (Zone 2) or rest to prevent muscle strain.
+
+---
+
+## 📐 11. Base-Building Riegel Race Exponent & Neuromuscular Headroom
+**Files**: [RacePredictor.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/RacePredictor.tsx), [analytics.ts](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/lib/analytics.ts)
+
+* **Mileage-Adjusted Dynamic Exponent**: Dynamically calculates Peter Riegel's fatigue exponent based on the athlete's 4-week average weekly distance, replacing optimistic predictions with honest projections:
+  - $\ge 70\text{ km/wk} \implies 1.06$ (Competitive)
+  - $\ge 50\text{ km/wk} \implies 1.07$ (Trained)
+  - $\ge 35\text{ km/wk} \implies 1.08$ (Recreational)
+  - $\ge 20\text{ km/wk} \implies 1.10$ (Developing)
+  - $< 20\text{ km/wk} \implies 1.12$ (Base-building focus)
+* **Neuromuscular Speed Reserve**: Computes speed reserve headroom in seconds/km by comparing absolute anaerobic sprint pace (400m PR) to aerobic target marathon pace. Provides real-time sports science coaching advisories to guide base development.
+
+---
+
+## 🎨 12. Premium UI/UX Design & Layout System
 **Files**: [styles.css](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/styles.css), [Dashboard.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/Dashboard.tsx), [OverviewGoalAndEvent.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/OverviewGoalAndEvent.tsx), [LoadChart.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/LoadChart.tsx), [PersonalBests.tsx](file:///c:/Users/HC/Documents/GitHub/fit-dashboard/src/components/PersonalBests.tsx)
 
+* **Premium Chip Filters**: Excluded cycling components entirely. Introduced runner-centric filter tags inside a collapsible container:
+  * **Sport chips** (`🎯 All Sports`, `🏃 Running`, `🚶 Walking`)
+  * **Heart Rate Zone chips** (Z1-Z5 color-coded zones matching custom metadata bounds)
+  * **Smart Presets chips** (`✅ Valid Only`, `⚠️ GPS Warmups (<0.8km)`, `🏆 Long Runs (≥12km)`, `🧘 Recoveries (<6km)`)
+  * **Distance corridor sliders**
 * **Fluid Responsive Layouts**: All tab containers (`.overview-goal-event-row`, `.analytics-tab-grid`, `.scheduler-layout-container`) use `max-width: 100%` to fill wide desktops.
 * **Stats Row at Top**: 5 aggregate running metric cards (Filtered Activities, Total Distance, Total Duration, Avg Distance, Avg Duration) are the first visible element on the Overview tab.
 * **Interactive Detachable Card Pinning**: Introduced a premium header-level `widget-pin-btn` component (`➕ Pin to Overview` / `📌 Pinned`) across `PersonalBests` (VO2 Max, Personal Records), `RacePredictor`, and `LoadChart`. Athletes can dynamically detach and pin these individual panels directly onto the **Overview** dashboard view, persisting selection states inside `localStorage` with prop-controlled selective rendering.
@@ -139,6 +172,7 @@ This document provides a comprehensive summary of the elite-tier features, sport
 * **Vertical Timeline Alignment**: Realigned Speed Trend, Cadence/Power, and Elevation timelines to use identical `{ left: 54, right: 54, top: 42, bottom: 46 }` grid margins, matching their horizontal bounding boxes perfectly for a unified vertical scan.
 * **Tabs**: Overview, Individual, Compare, Readiness & Load, Personal Bests, Scheduler.
 * **Donation Banner**: Removed from the main content area.
+* **Links & Supporter Badge Removal**: Completely removed the *Links and Contact* and *Supporter Badge* boxes from the Settings Drawer, creating a highly polished, clean, and distraction-free user settings interface.
 * **Micro-Animations**: `animate-fade-in` class for smooth tab transitions; telemetry pulse animation (`telemetry-pulse` keyframe).
 * **Glassmorphism Cards**: `glass-card` class with translucent background, blur, and subtle borders.
 

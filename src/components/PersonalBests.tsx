@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { distanceLabel } from "../lib/units";
 import { RacePredictor } from "./RacePredictor";
 import { useMemo } from "react";
+import { usePinnedWidgetsStore } from "../stores/pinnedWidgetsStore";
 
 // Jack Daniels' VDOT (VO2 Max) formula estimation from running performance
 function estimateVdot(distanceM: number, durationS: number): number {
@@ -22,8 +23,8 @@ export function PersonalBests({
   activities, 
   distanceUnit,
   theme,
-  pinnedWidgets,
-  togglePinWidget,
+  pinnedWidgets: propsPinnedWidgets,
+  togglePinWidget: propsTogglePinWidget,
   onlyPinned = false
 }: { 
   activities: Activity[]; 
@@ -33,6 +34,11 @@ export function PersonalBests({
   togglePinWidget?: (id: string) => void;
   onlyPinned?: boolean;
 }) {
+  const storePinnedWidgets = usePinnedWidgetsStore((s) => s.pinnedWidgets);
+  const storeTogglePinWidget = usePinnedWidgetsStore((s) => s.togglePinWidget);
+  
+  const pinnedWidgets = propsPinnedWidgets ?? storePinnedWidgets;
+  const togglePinWidget = propsTogglePinWidget ?? storeTogglePinWidget;
   const [runningBests, setRunningBests] = useState<BestDistanceEffort[]>([]);
   const [runningPowerBests, setRunningPowerBests] = useState<BestPowerEffort[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,6 +74,39 @@ export function PersonalBests({
     }
     return Math.round(maxVdot * 10) / 10;
   }, [runningBests]);
+
+  const jdTrainingPaces = useMemo(() => {
+    const vdot = estimatedVdot > 0 ? estimatedVdot : 40.9;
+    
+    const getSpeed = (vo2: number) => {
+      const a = 0.000104;
+      const b = 0.182258;
+      const c = -(4.60 + vo2);
+      return (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
+    };
+
+    const pEasLow = getSpeed(vdot * 0.65);
+    const pEasHigh = getSpeed(vdot * 0.60);
+    const pMar = getSpeed(vdot * 0.716);
+    const pThr = getSpeed(vdot * 0.826);
+    const pInt = getSpeed(vdot * 0.938);
+    const pRep = getSpeed(vdot * 1.051);
+
+    const paceSec = (speedMMin: number) => {
+      if (speedMMin <= 0) return 0;
+      return (1000 / speedMMin) * 60;
+    };
+
+    return {
+      vdot,
+      easyLow: paceSec(pEasLow),
+      easyHigh: paceSec(pEasHigh),
+      marathon: paceSec(pMar),
+      threshold: paceSec(pThr),
+      interval: paceSec(pInt),
+      repetition: paceSec(pRep)
+    };
+  }, [estimatedVdot]);
 
   const activeVo2 = garminVo2Max > 0 ? garminVo2Max : estimatedVdot;
 
@@ -350,6 +389,70 @@ export function PersonalBests({
               </div>
 
             </div>
+
+            {/* VDOT-Derived Training Paces Section */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", borderTop: "1px solid var(--border)", paddingTop: "1.25rem", marginTop: "0.5rem", width: "100%" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                  🎯 VDOT-Derived Training Paces (Jack Daniels Formula)
+                </span>
+                <span style={{ fontSize: "10.5px", color: "var(--text-secondary)" }}>
+                  Performance VDOT: <strong>{jdTrainingPaces.vdot.toFixed(1)}</strong>
+                </span>
+              </div>
+              
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem", width: "100%" }}>
+                {[
+                  { label: "Easy (E)", range: true, valLow: jdTrainingPaces.easyLow, valHigh: jdTrainingPaces.easyHigh, purpose: "Aerobic base, active recovery", color: "#10b981", bg: "rgba(16, 185, 129, 0.08)", border: "rgba(16, 185, 129, 0.2)" },
+                  { label: "Marathon (M)", val: jdTrainingPaces.marathon, purpose: "Race pace simulation", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.08)", border: "rgba(59, 130, 246, 0.2)" },
+                  { label: "Threshold (T)", val: jdTrainingPaces.threshold, purpose: "Lactate clearance tempo", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.08)", border: "rgba(245, 158, 11, 0.2)" },
+                  { label: "Interval (I)", val: jdTrainingPaces.interval, purpose: "VO2max hard repeats", color: "#ef4444", bg: "rgba(239, 68, 68, 0.08)", border: "rgba(239, 68, 68, 0.2)" },
+                  { label: "Repetition (R)", val: jdTrainingPaces.repetition, purpose: "Economy & speed strides", color: "#ec4899", bg: "rgba(236, 72, 153, 0.08)", border: "rgba(236, 72, 153, 0.2)" }
+                ].map((p, idx) => {
+                  const formatPaceVal = (secPerKm: number) => {
+                    const unitScale = distanceUnit === "km" ? 1.0 : 1.60934;
+                    const paceScaled = secPerKm * unitScale;
+                    const min = Math.floor(paceScaled / 60);
+                    const sec = Math.floor(paceScaled % 60);
+                    return `${min}:${sec.toString().padStart(2, "0")} /${suffix}`;
+                  };
+
+                  const paceStr = p.range 
+                    ? (() => {
+                        const unitScale = distanceUnit === "km" ? 1.0 : 1.60934;
+                        const paceScaledLow = p.valLow * unitScale;
+                        const paceScaledHigh = p.valHigh * unitScale;
+                        
+                        const minL = Math.floor(paceScaledLow / 60);
+                        const secL = Math.floor(paceScaledLow % 60);
+                        
+                        const minH = Math.floor(paceScaledHigh / 60);
+                        const secH = Math.floor(paceScaledHigh % 60);
+                        
+                        return `${minL}:${secL.toString().padStart(2, "0")}–${minH}:${secH.toString().padStart(2, "0")} /${suffix}`;
+                      })()
+                    : formatPaceVal(p.val ?? 0);
+
+                  return (
+                    <div key={idx} style={{
+                      background: p.bg,
+                      border: `1px solid ${p.border}`,
+                      borderRadius: "8px",
+                      padding: "0.6rem 0.75rem",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                      textAlign: "left"
+                    }}>
+                      <span style={{ fontSize: "10.5px", fontWeight: "bold", color: p.color }}>{p.label}</span>
+                      <strong style={{ fontSize: "1.1rem", fontWeight: "800", color: "var(--text)" }}>{paceStr}</strong>
+                      <span style={{ fontSize: "9px", color: "var(--text-secondary)", lineHeight: "1.3" }}>{p.purpose}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
           </section>
           )}
           
@@ -478,6 +581,7 @@ export function PersonalBests({
           {showPredictor && (
             <RacePredictor 
               runningBests={runningBests} 
+              activities={activities}
               distanceUnit={distanceUnit} 
               theme={theme} 
               pinnedWidgets={pinnedWidgets} 

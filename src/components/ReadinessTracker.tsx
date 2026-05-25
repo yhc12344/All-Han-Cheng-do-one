@@ -150,6 +150,12 @@ export function ReadinessTracker({
             else if (p.seriesName.includes("Fatigue")) suffix = " pts";
             html += `<div>${p.marker} ${label}: <strong>${val}</strong>${suffix}</div>`;
           });
+          
+          const match = loadTimeline.find(pt => pt.dateStr === date);
+          if (match) {
+            const acwrColor = match.acwr > 1.5 ? '#ef4444' : match.acwr > 1.3 ? '#f59e0b' : match.acwr >= 0.8 ? '#10b981' : '#94a3b8';
+            html += `<div style="margin-top:4px; border-top:1px solid rgba(255,255,255,0.06); padding-top:4px;"><span style="display:inline-block;margin-right:4px;border-radius:10px;width:8px;height:8px;background-color:${acwrColor};"></span> ACWR Workload: <strong>${match.acwr.toFixed(2)}</strong></div>`;
+          }
           return html;
         }
       },
@@ -246,6 +252,24 @@ export function ReadinessTracker({
 
   const dialColor = activeResult ? dialColors[activeResult.zone] : "#f59e0b";
 
+  // ACWR dial math
+  const acwrValue = activeResult ? (loadTimeline.find(pt => pt.dateStr === activeResult.dateStr)?.acwr ?? 0) : 0;
+  const acwrPercentage = Math.min(100, Math.max(0, (acwrValue / 2.0) * 100)); // Cap at 2.0 (fills 100% of dial)
+  const acwrDashOffset = circumference - (acwrPercentage / 100) * circumference;
+
+  let acwrColor = "#ef4444"; // default danger
+  let acwrZoneLabel = "Danger Zone";
+  if (acwrValue < 0.8) {
+    acwrColor = "#94a3b8"; // undertraining
+    acwrZoneLabel = "Undertraining";
+  } else if (acwrValue <= 1.3) {
+    acwrColor = "#10b981"; // sweet spot (optimal)
+    acwrZoneLabel = "Optimal (Sweet Spot)";
+  } else if (acwrValue <= 1.5) {
+    acwrColor = "#f59e0b"; // caution
+    acwrZoneLabel = "Caution (Elevated Risk)";
+  }
+
   return (
     <div className="readiness-dashboard-container animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
       
@@ -279,49 +303,87 @@ export function ReadinessTracker({
         <section className="panel glass-card" style={{ flex: "1 1 320px", maxWidth: "360px", padding: "2rem 1.5rem", display: "flex", flexDirection: "column", gap: "1.5rem", alignItems: "center", justifyContent: "space-between", textAlign: "center" }}>
           <div style={{ width: "100%", textAlign: "left" }}>
             <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              Autonomous Autonomic State
+              Workload & Recovery Dials
             </span>
           </div>
 
-          {/* SVG circular Ring */}
-          <div style={{ position: "relative", width: "135px", height: "135px", margin: "0.5rem 0" }}>
-            <svg width="135" height="135" viewBox="0 0 120 120" style={{ transform: "rotate(-90deg)" }}>
-              <circle cx="60" cy="60" r={ringRadius} fill="transparent" stroke="rgba(255, 255, 255, 0.05)" strokeWidth={strokeWidth} />
-              <circle
-                cx="60"
-                cy="60"
-                r={ringRadius}
-                fill="transparent"
-                stroke={dialColor}
-                strokeWidth={strokeWidth}
-                strokeDasharray={circumference}
-                strokeDashoffset={dashOffset}
-                strokeLinecap="round"
-                style={{
-                  transition: "stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
-                  filter: `drop-shadow(0 0 4px ${dialColor})`
-                }}
-              />
-            </svg>
-            
-            {/* Center percentage label */}
-            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <span style={{ fontSize: "2.25rem", fontWeight: 900, color: "var(--text)", lineHeight: 1 }}>
-                {readinessPercentage}
-              </span>
-              <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", marginTop: "2px" }}>
-                PRI Index
-              </span>
+          {/* Dual circular Rings side-by-side */}
+          <div style={{ display: "flex", gap: "1rem", justifyContent: "center", width: "100%", margin: "0.5rem 0" }}>
+            {/* PRI Dial */}
+            <div style={{ position: "relative", width: "120px", height: "120px" }}>
+              <svg width="120" height="120" viewBox="0 0 120 120" style={{ transform: "rotate(-90deg)" }}>
+                <circle cx="60" cy="60" r={ringRadius} fill="transparent" stroke="rgba(255, 255, 255, 0.05)" strokeWidth={strokeWidth} />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r={ringRadius}
+                  fill="transparent"
+                  stroke={dialColor}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={circumference}
+                  strokeDashoffset={dashOffset}
+                  strokeLinecap="round"
+                  style={{
+                    transition: "stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
+                    filter: `drop-shadow(0 0 4px ${dialColor})`
+                  }}
+                />
+              </svg>
+              <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{ fontSize: "1.75rem", fontWeight: 900, color: "var(--text)", lineHeight: 1 }}>
+                  {readinessPercentage}
+                </span>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "600", marginTop: "1px" }}>
+                  PRI Index
+                </span>
+              </div>
+            </div>
+
+            {/* ACWR Dial */}
+            <div style={{ position: "relative", width: "120px", height: "120px" }}>
+              <svg width="120" height="120" viewBox="0 0 120 120" style={{ transform: "rotate(-90deg)" }}>
+                <circle cx="60" cy="60" r={ringRadius} fill="transparent" stroke="rgba(255, 255, 255, 0.05)" strokeWidth={strokeWidth} />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r={ringRadius}
+                  fill="transparent"
+                  stroke={acwrColor}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={circumference}
+                  strokeDashoffset={acwrDashOffset}
+                  strokeLinecap="round"
+                  style={{
+                    transition: "stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
+                    filter: `drop-shadow(0 0 4px ${acwrColor})`
+                  }}
+                />
+              </svg>
+              <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{ fontSize: "1.75rem", fontWeight: 900, color: "var(--text)", lineHeight: 1 }}>
+                  {acwrValue.toFixed(2)}
+                </span>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "600", marginTop: "1px" }}>
+                  ACWR Ratio
+                </span>
+              </div>
             </div>
           </div>
 
           {activeResult && (
-            <div style={{ borderLeft: `3px solid ${dialColor}`, paddingLeft: "12px", textAlign: "left", width: "100%" }}>
-              <span style={{ fontSize: "15px", fontWeight: "bold", color: dialColor, display: "block" }}>
-                {activeResult.zoneLabel}
-              </span>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                Autonomic balance for: <strong>{activeResult.dateStr}</strong>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%", textAlign: "left", paddingLeft: "4px" }}>
+              <div style={{ borderLeft: `3px solid ${dialColor}`, paddingLeft: "10px" }}>
+                <span style={{ fontSize: "14px", fontWeight: "bold", color: dialColor, display: "block" }}>
+                  PRI: {activeResult.zoneLabel}
+                </span>
+              </div>
+              <div style={{ borderLeft: `3px solid ${acwrColor}`, paddingLeft: "10px" }}>
+                <span style={{ fontSize: "14px", fontWeight: "bold", color: acwrColor, display: "block" }}>
+                  ACWR: {acwrZoneLabel}
+                </span>
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                Workload & recovery balance for: <strong>{activeResult.dateStr}</strong>
               </span>
             </div>
           )}

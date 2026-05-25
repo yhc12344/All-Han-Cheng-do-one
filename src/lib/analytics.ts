@@ -232,6 +232,7 @@ export interface LoadDataPoint {
   fatigue: number;  // ATL
   form: number;     // TSB
   dailyLoad: number;
+  acwr: number;
 }
 
 export function calculateTrainingLoad(activities: Activity[]): LoadDataPoint[] {
@@ -275,13 +276,15 @@ export function calculateTrainingLoad(activities: Activity[]): LoadDataPoint[] {
     ctl = ctl * ctlDecay + dayLoad * (1 - ctlDecay);
     atl = atl * atlDecay + dayLoad * (1 - atlDecay);
     const form = ctl - atl;
+    const acwr = ctl <= 0 ? 0 : atl / ctl;
 
     loadTimeline.push({
       dateStr,
       fitness: Math.round(ctl * 10) / 10,
       fatigue: Math.round(atl * 10) / 10,
       form: Math.round(form * 10) / 10,
-      dailyLoad: Math.round(dayLoad * 10) / 10
+      dailyLoad: Math.round(dayLoad * 10) / 10,
+      acwr: Math.round(acwr * 100) / 100
     });
   }
 
@@ -353,7 +356,15 @@ export interface RacePrediction {
   predictedPaceSecPerKm: number;
 }
 
-export function predictRaceTimes(bestEfforts: BestDistanceEffort[]): RacePrediction[] {
+export function calculateRiegelExponent(avgWeeklyKm: number): number {
+  if (avgWeeklyKm >= 70) return 1.06;  // competitive
+  if (avgWeeklyKm >= 50) return 1.07;  // trained
+  if (avgWeeklyKm >= 35) return 1.08;  // recreational
+  if (avgWeeklyKm >= 20) return 1.10;  // developing
+  return 1.12;                          // base-building
+}
+
+export function predictRaceTimes(bestEfforts: BestDistanceEffort[], avgWeeklyKm?: number): RacePrediction[] {
   const standardRaces = [
     { meters: 1609.34, label: "1 Mile" },
     { meters: 5000, label: "5 km" },
@@ -362,10 +373,14 @@ export function predictRaceTimes(bestEfforts: BestDistanceEffort[]): RacePredict
     { meters: 42195, label: "Marathon" }
   ];
 
+  const exponent = avgWeeklyKm !== undefined && avgWeeklyKm >= 0 
+    ? calculateRiegelExponent(avgWeeklyKm) 
+    : 1.06;
+
   if (!bestEfforts || bestEfforts.length === 0) {
     const base5k = 1500; // 25:00 default
     return standardRaces.map(race => {
-      const riegelSec = base5k * Math.pow(race.meters / 5000, 1.06);
+      const riegelSec = base5k * Math.pow(race.meters / 5000, exponent);
       return {
         distanceMeters: race.meters,
         label: race.label,
@@ -383,8 +398,8 @@ export function predictRaceTimes(bestEfforts: BestDistanceEffort[]): RacePredict
     || bestEfforts[bestEfforts.length - 1];
 
   return standardRaces.map(race => {
-    // Riegel: T2 = T1 * (D2 / D1)^1.06
-    const predictedDurationS = anchor.bestDurationS * Math.pow(race.meters / anchor.distanceMeters, 1.06);
+    // Riegel: T2 = T1 * (D2 / D1)^exponent
+    const predictedDurationS = anchor.bestDurationS * Math.pow(race.meters / anchor.distanceMeters, exponent);
     return {
       distanceMeters: race.meters,
       label: race.label,

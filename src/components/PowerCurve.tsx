@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { compilePowerCurve } from "../lib/analytics";
@@ -11,6 +11,13 @@ export function PowerCurve({
   records: RecordPoint[]; 
   theme: "light" | "dark" 
 }) {
+  const prevRecordsLengthRef = useRef(records.length);
+  let notMerge = false;
+  if (prevRecordsLengthRef.current !== records.length) {
+    notMerge = true;
+    prevRecordsLengthRef.current = records.length;
+  }
+
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -123,7 +130,7 @@ export function PowerCurve({
         <ReactECharts 
           option={chartOption} 
           onChartReady={enableChartWheelPageScroll}
-          notMerge 
+          notMerge={notMerge} 
           style={{ height: "100%", width: "100%" }} 
         />
       </div>

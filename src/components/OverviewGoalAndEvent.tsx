@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { Activity } from "../types";
 import { distanceDivisor, distanceLabel } from "../lib/units";
-import { calculateTrainingLoad, calculateDailyReadiness, isValidActivity } from "../lib/analytics";
+import { calculateTrainingLoad, calculateDailyReadiness, isValidActivity, calculateRiegelExponent } from "../lib/analytics";
 
 interface RaceEvent {
   name: string;
@@ -216,12 +216,13 @@ export function OverviewGoalAndEvent({
       }
     }
 
-    const predictedS = anchorTimeS * Math.pow(42195 / anchorDist, 1.06);
+    const exponent = calculateRiegelExponent(avgWeeklyKm);
+    const predictedS = anchorTimeS * Math.pow(42195 / anchorDist, exponent);
     return {
       timeS: Math.round(predictedS),
       paceSec: predictedS / 42.195
     };
-  }, [activities]);
+  }, [activities, avgWeeklyKm]);
 
   const gapStats = useMemo(() => {
     const targetPaceSec = 298; // 4:58/km
@@ -364,6 +365,58 @@ export function OverviewGoalAndEvent({
       showWarning: false
     };
   }, [recentStats, avgWeeklyKm, readinessScore, currentForm]);
+
+  const intensityProfile = useMemo(() => {
+    const type = recommendation.type;
+    const title = recommendation.title;
+    
+    if (type.includes("Recovery") || type.includes("Restoration") || title.includes("Restoration")) {
+      return {
+        z1: 90,
+        z2: 10,
+        z3: 0,
+        z4: 0,
+        z5: 0,
+        description: "90% Recovery / 10% Base focus"
+      };
+    } else if (type.includes("Aerobic") || title.includes("Base Builder") || title.includes("Zone 2")) {
+      return {
+        z1: 15,
+        z2: 80,
+        z3: 5,
+        z4: 0,
+        z5: 0,
+        description: "80% Zone 2 Aerobic Base focus"
+      };
+    } else if (type.includes("Sweet Spot") || type.includes("Tempo") || title.includes("Tempo") || title.includes("Threshold Spark")) {
+      return {
+        z1: 15,
+        z2: 30,
+        z3: 40,
+        z4: 15,
+        z5: 0,
+        description: "Sweet Spot / Tempo focus: Z3 (40%), Z2 (30%)"
+      };
+    } else if (type.includes("VO2max") || type.includes("Interval") || title.includes("Speed Intervals") || title.includes("Lactic")) {
+      return {
+        z1: 20,
+        z2: 25,
+        z3: 15,
+        z4: 30,
+        z5: 10,
+        description: "High-intensity VO2max / Lactic intervals"
+      };
+    }
+    
+    return {
+      z1: 20,
+      z2: 70,
+      z3: 10,
+      z4: 0,
+      z5: 0,
+      description: "70% Base / 20% Recovery focus"
+    };
+  }, [recommendation]);
 
   const upcomingWeekSuggestedPlan = useMemo(() => {
     const plan = [
@@ -592,8 +645,35 @@ export function OverviewGoalAndEvent({
     return days;
   }, [activities]);
 
+  // ACWR check for Banner
+  const currentAcwr = useMemo(() => {
+    if (!loadTimeline.length) return 0;
+    return loadTimeline[loadTimeline.length - 1].acwr ?? 0;
+  }, [loadTimeline]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%" }}>
+      {currentAcwr > 1.3 && (
+        <div style={{
+          background: "var(--warning-bg)",
+          border: "1px solid var(--warning-border)",
+          borderRadius: "8px",
+          padding: "1rem 1.25rem",
+          textAlign: "left",
+          fontSize: "12.5px",
+          color: "var(--text-warning)",
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          width: "100%",
+          boxSizing: "border-box"
+        }}>
+          <span style={{ fontSize: "1.5rem" }}>⚠️</span>
+          <div>
+            <strong>High Acute Load Warning:</strong> Your Acute:Chronic Workload Ratio (ACWR) has spiked to <strong>{currentAcwr.toFixed(2)}</strong> (Caution Sweet-Spot limit: 1.30). You are in a high injury risk zone due to rapid training load increases. Prioritise easy Zone 2 runs and rest days.
+          </div>
+        </div>
+      )}
       {/* Premium 2x2 Grid Layout for Spacious, Wide Cards */}
       <div className="overview-goal-event-row" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1.5rem", width: "100%", margin: "0.5rem 0 0 0" }}>
         
@@ -645,15 +725,68 @@ export function OverviewGoalAndEvent({
             </div>
 
             {/* Column 2: Intensity Visualizer & Volume stats */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "1rem", height: "100%", justifyContent: "center" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span style={{ fontSize: "9.5px", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: "bold" }}>Suggested Intensity Profile</span>
-                <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: "6px", height: "26px", padding: "2px", position: "relative", overflow: "hidden" }}>
-                  <div style={{ flex: 1, height: "100%", background: recommendation.type.includes("Restoration") || recommendation.type.includes("Recovery") ? "rgba(168, 85, 247, 0.25)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold", borderRight: "1px solid var(--border)", color: recommendation.type.includes("Restoration") || recommendation.type.includes("Recovery") ? "#a855f7" : "var(--text-muted)" }}>Z1 Rec</div>
-                  <div style={{ flex: 1.5, height: "100%", background: recommendation.type.includes("Endurance") || recommendation.type.includes("Builder") ? "rgba(16, 185, 129, 0.25)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold", borderRight: "1px solid var(--border)", color: recommendation.type.includes("Endurance") || recommendation.type.includes("Builder") ? "#10b981" : "var(--text-muted)" }}>Z2 Base</div>
-                  <div style={{ flex: 1.2, height: "100%", background: recommendation.type.includes("Sweet Spot") || recommendation.type.includes("Tempo") ? "rgba(245, 158, 11, 0.25)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold", borderRight: "1px solid var(--border)", color: recommendation.type.includes("Sweet Spot") || recommendation.type.includes("Tempo") ? "#f59e0b" : "var(--text-muted)" }}>Z3 Temp</div>
-                  <div style={{ flex: 1.2, height: "100%", background: recommendation.type.includes("Threshold") || recommendation.type.includes("Speed") ? "rgba(239, 68, 68, 0.25)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold", borderRight: "1px solid var(--border)", color: recommendation.type.includes("Threshold") || recommendation.type.includes("Speed") ? "#ef4444" : "var(--text-muted)" }}>Z4 Thr</div>
-                  <div style={{ flex: 0.8, height: "100%", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold", color: "var(--text-muted)" }}>Z5 An</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem", height: "100%", justifyContent: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "9.5px", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: "bold", letterSpacing: "0.5px" }}>Suggested Intensity Profile</span>
+                
+                {/* Stacked bar representing intensity distribution */}
+                <div style={{ 
+                  display: "flex", 
+                  height: "8px", 
+                  borderRadius: "4px", 
+                  overflow: "hidden", 
+                  background: "rgba(255,255,255,0.03)", 
+                  border: "1px solid rgba(255,255,255,0.05)",
+                  boxShadow: "inset 0 1px 2px rgba(0,0,0,0.2)"
+                }}>
+                  {intensityProfile.z1 > 0 && <div style={{ width: `${intensityProfile.z1}%`, background: "linear-gradient(90deg, #a855f7, #c084fc)", transition: "width 0.3s ease" }} title={`Z1 Rec: ${intensityProfile.z1}%`} />}
+                  {intensityProfile.z2 > 0 && <div style={{ width: `${intensityProfile.z2}%`, background: "linear-gradient(90deg, #10b981, #34d399)", transition: "width 0.3s ease" }} title={`Z2 Base: ${intensityProfile.z2}%`} />}
+                  {intensityProfile.z3 > 0 && <div style={{ width: `${intensityProfile.z3}%`, background: "linear-gradient(90deg, #f59e0b, #fbbf24)", transition: "width 0.3s ease" }} title={`Z3 Temp: ${intensityProfile.z3}%`} />}
+                  {intensityProfile.z4 > 0 && <div style={{ width: `${intensityProfile.z4}%`, background: "linear-gradient(90deg, #ef4444, #f87171)", transition: "width 0.3s ease" }} title={`Z4 Thr: ${intensityProfile.z4}%`} />}
+                  {intensityProfile.z5 > 0 && <div style={{ width: `${intensityProfile.z5}%`, background: "linear-gradient(90deg, #ec4899, #f472b6)", transition: "width 0.3s ease" }} title={`Z5 An: ${intensityProfile.z5}%`} />}
+                </div>
+
+                {/* 5 compact column elements for each zone */}
+                <div style={{ display: "flex", gap: "4px" }}>
+                  {[
+                    { key: "z1", label: "Z1 Rec", color: "#a855f7", bg: "rgba(168, 85, 247, 0.12)", hoverGlow: "0 0 8px rgba(168, 85, 247, 0.35)" },
+                    { key: "z2", label: "Z2 Base", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)", hoverGlow: "0 0 8px rgba(16, 185, 129, 0.35)" },
+                    { key: "z3", label: "Z3 Temp", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.12)", hoverGlow: "0 0 8px rgba(245, 158, 11, 0.35)" },
+                    { key: "z4", label: "Z4 Thr", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)", hoverGlow: "0 0 8px rgba(239, 68, 68, 0.35)" },
+                    { key: "z5", label: "Z5 An", color: "#ec4899", bg: "rgba(236, 72, 153, 0.12)", hoverGlow: "0 0 8px rgba(236, 72, 153, 0.35)" }
+                  ].map((z) => {
+                    const pct = intensityProfile[z.key as keyof typeof intensityProfile] as number;
+                    const isActive = pct > 0;
+                    return (
+                      <div 
+                        key={z.key} 
+                        style={{
+                          flex: z.key === "z2" ? 1.25 : 1, // Z2 gets a bit more room
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          padding: "5px 2px",
+                          borderRadius: "6px",
+                          background: isActive ? z.bg : "rgba(255,255,255,0.01)",
+                          border: isActive ? `1px solid ${z.color}44` : "1px solid rgba(255,255,255,0.03)",
+                          boxShadow: isActive ? z.hoverGlow : "none",
+                          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                        }}
+                      >
+                        <span style={{ fontSize: "8px", fontWeight: "bold", color: isActive ? z.color : "var(--text-muted)" }}>{z.label}</span>
+                        <span style={{ fontSize: "9px", fontWeight: "900", color: isActive ? "var(--text)" : "var(--text-muted)", marginTop: "2px" }}>
+                          {isActive ? `${pct}%` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                  <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: intensityProfile.z2 > 50 ? "#10b981" : intensityProfile.z4 > 20 || intensityProfile.z5 > 0 ? "#ef4444" : "#a855f7" }} />
+                  <span style={{ fontSize: "9.5px", color: "var(--text-secondary)", fontWeight: "500" }}>
+                    {intensityProfile.description}
+                  </span>
                 </div>
               </div>
 

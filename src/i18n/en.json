@@ -229,8 +229,12 @@
   "heatmap.less": "Less",
   "heatmap.more": "More",
   "heatmap.mon": "Mon",
+  "heatmap.tue": "Tue",
   "heatmap.wed": "Wed",
+  "heatmap.thu": "Thu",
   "heatmap.fri": "Fri",
+  "heatmap.sat": "Sat",
+  "heatmap.sun": "Sun",
   "heatmap.activity": "activity",
   "heatmap.activities": "activities",
 

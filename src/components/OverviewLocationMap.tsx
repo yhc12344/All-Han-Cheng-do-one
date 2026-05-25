@@ -147,6 +147,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   const { t } = useTranslation();
   const selectedStyle = mapStyle === "default" ? theme : mapStyle;
   const [colorTheme, setColorTheme] = useState<"flame" | "forest" | "electric" | "amethyst">("flame");
+  const [isVisible, setIsVisible] = useState(false);
 
   const stats = useMemo(() => {
     if (!records || !records.length) {
@@ -305,7 +306,28 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   }, [colorTheme]);
 
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    const el = mapContainerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible || !mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -334,7 +356,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [isVisible]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -369,6 +391,8 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       };
     }
   }, [geojson]);
+
+
 
   return (
     <div className="panel overview-location-panel">
@@ -424,7 +448,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         <div className="overview-map-canvas" ref={mapContainerRef} style={{ flex: 1, height: "100%", minHeight: 0 }} />
         
         {/* Route & Exploration Storyteller Card */}
-        <div className="route-storyteller-panel glass-card">
+        <div className="route-storyteller-panel glass-card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", overflowY: "auto", maxHeight: "100%" }}>
           <div className="storyteller-title-section">
             <h4 className="storyteller-heading">
               <span>🗺️</span> {t("map.storytellerTitle")}
@@ -443,7 +467,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
               </span>
             </div>
             <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--text)" }}>
-              Hougang East Canal Loop
+              Punggol Waterway Loop
             </div>
             <div className="story-bar-bg">
               <div 
@@ -456,7 +480,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
               />
             </div>
             <p className="story-description">
-              Flat, continuous, traffic-free pavement along the Sungei Pinang park connector — ideal for maintaining a steady aerobic heart rate.
+              Flat, continuous, and traffic-free pavement along the Punggol Waterway Park connector — ideal for maintaining a steady aerobic heart rate.
             </p>
           </div>
 
@@ -469,7 +493,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
               </span>
             </div>
             <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--text)" }}>
-              Hougang West & Johor
+              Sengkang Riverside & Johor
             </div>
             <div className="story-bar-bg">
               <div 
@@ -481,7 +505,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
               />
             </div>
             <p className="story-description">
-              A mix of residential pavement variety in Hougang West and slightly undulating loops in Kampung Pasir Gudang Baru (Johor) to challenge ankle stabilizer muscles.
+              A mix of scenic loop connectors around Sengkang Riverside Park and slightly undulating loops in Pasir Gudang (Johor) to challenge ankle stabilizer muscles.
             </p>
           </div>
 
@@ -520,9 +544,11 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
               <span>🌴</span> <strong>Canal Breeze (65% shade)</strong>
             </div>
             <p className="story-description" style={{ marginTop: "0.4rem" }}>
-              Running along Sungei Pinang canal pathways offers a cooling microclimate, blocking 65% of solar heat radiation to mitigate Singapore's 82% average humidity.
+              Running along Punggol Waterway canal pathways offers a cooling microclimate, blocking 65% of solar heat radiation to mitigate Singapore's 82% average humidity.
             </p>
           </div>
+
+
         </div>
       </div>
 

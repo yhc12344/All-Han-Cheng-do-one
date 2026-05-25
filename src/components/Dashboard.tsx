@@ -1,6 +1,7 @@
 import { DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useActivityStore } from "../stores/activityStore";
+import { usePinnedWidgetsStore } from "../stores/pinnedWidgetsStore";
 import { ActivityChart } from "./ActivityChart";
 import { ActivityMap } from "./ActivityMap";
 import { CompareCharts } from "./CompareCharts";
@@ -122,10 +123,11 @@ function shortenFileName(name: string, maxLength = 45): string {
   return `${name.slice(0, maxLength)}...`;
 }
 
-function parseActivityMetadata(raw?: string): ActivityMetadata | null {
+function parseActivityMetadata(raw?: any): ActivityMetadata | null {
   if (!raw) return null;
+  if (typeof raw === "object") return raw as ActivityMetadata;
   try {
-    const parsed = JSON.parse(raw) as ActivityMetadata;
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -309,6 +311,10 @@ export function Dashboard({ onLogout }: Props) {
   const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [minDistance, setMinDistance] = useState("");
+  const [maxDistance, setMaxDistance] = useState("");
+  const [smartPreset, setSmartPreset] = useState("all");
+  const [filterHrZone, setFilterHrZone] = useState("all");
   const [datePickerFromOpen, setDatePickerFromOpen] = useState(false);
   const [datePickerToOpen, setDatePickerToOpen] = useState(false);
   const dateFromBtnRef = useRef<HTMLButtonElement>(null);
@@ -337,25 +343,9 @@ export function Dashboard({ onLogout }: Props) {
   const [appVersion, setAppVersion] = useState("unknown");
   const [versionBadgeStatus, setVersionBadgeStatus] = useState<VersionBadgeStatus>({ state: "hidden", latestVersion: null });
 
-  // Pinned overview widgets state
-  const [pinnedWidgets, setPinnedWidgets] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem("fit_pinned_overview_widgets");
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const togglePinWidget = (widgetId: string) => {
-    setPinnedWidgets(prev => {
-      const next = prev.includes(widgetId)
-        ? prev.filter(id => id !== widgetId)
-        : [...prev, widgetId];
-      localStorage.setItem("fit_pinned_overview_widgets", JSON.stringify(next));
-      return next;
-    });
-  };
+  // Pinned overview widgets store subscription
+  const pinnedWidgets = usePinnedWidgetsStore((s) => s.pinnedWidgets);
+  const togglePinWidget = usePinnedWidgetsStore((s) => s.togglePinWidget);
 
   // Inline rename/delete state
   const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
@@ -437,11 +427,19 @@ export function Dashboard({ onLogout }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    void loadSupporterStatus();
-  }, []);
-
-
+  function getActivityHrZone(activity: Activity): number {
+    const meta = parseActivityMetadata(activity.metadata_json);
+    if (!meta) return 0;
+    const avgHr = meta?.session?.avg_heart_rate;
+    if (typeof avgHr !== "number" || avgHr <= 0) return 0;
+    
+    const bounds = meta?.heart_rate_zone_bounds_bpm || [75, 95, 120, 150];
+    if (avgHr <= bounds[0]) return 1;
+    if (avgHr <= bounds[1]) return 2;
+    if (avgHr <= bounds[2]) return 3;
+    if (avgHr <= bounds[3]) return 4;
+    return 5;
+  }
 
   function parseUtcDate(input: string): Date {
     const trimmed = input.trim();
@@ -451,17 +449,34 @@ export function Dashboard({ onLogout }: Props) {
   }
 
   const filtered = useMemo(() => {
-    const minSec = minDurationMinutes ? Number(minDurationMinutes) * 60 : null;
-    const maxSec = maxDurationMinutes ? Number(maxDurationMinutes) * 60 : null;
+    const minSec = minDurationMinutes && !isNaN(parseFloat(minDurationMinutes)) ? parseFloat(minDurationMinutes) * 60 : null;
+    const maxSec = maxDurationMinutes && !isNaN(parseFloat(maxDurationMinutes)) ? parseFloat(maxDurationMinutes) * 60 : null;
     const fromTs = dateFrom ? dateFrom.getTime() : null;
     const toTs = dateTo ? (dateTo.getTime() + 86399999) : null;
+
+    const scale = distanceUnit === "km" ? 1000 : 1609.34;
+    const distMinM = minDistance && !isNaN(parseFloat(minDistance)) ? parseFloat(minDistance) * scale : null;
+    const distMaxM = maxDistance && !isNaN(parseFloat(maxDistance)) ? parseFloat(maxDistance) * scale : null;
 
     return activities.filter((a) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         if (!`${a.activity_name} ${a.file_name} ${a.sport}`.toLowerCase().includes(q)) return false;
       }
-      if (filterSport !== "all" && a.sport !== filterSport) return false;
+      
+      // Dynamic sport chips partial matching
+      if (filterSport !== "all") {
+        if (!a.sport) return false;
+        const s = a.sport.toLowerCase();
+        if (filterSport === "running") {
+          if (!s.includes("run")) return false;
+        } else if (filterSport === "walking") {
+          if (!s.includes("walk") && !s.includes("hik")) return false;
+        } else {
+          if (s !== filterSport.toLowerCase()) return false;
+        }
+      }
+
       const ts = parseUtcDate(a.start_ts_utc).getTime();
       if (Number.isFinite(ts)) {
         if (fromTs !== null && ts < fromTs) return false;
@@ -469,9 +484,25 @@ export function Dashboard({ onLogout }: Props) {
       }
       if (minSec !== null && Number.isFinite(minSec) && a.duration_s < minSec) return false;
       if (maxSec !== null && Number.isFinite(maxSec) && a.duration_s > maxSec) return false;
+      if (distMinM !== null && Number.isFinite(distMinM) && a.distance_m < distMinM) return false;
+      if (distMaxM !== null && Number.isFinite(distMaxM) && a.distance_m > distMaxM) return false;
+
+      // HR Zone Focus Filter
+      if (filterHrZone !== "all") {
+        const zone = getActivityHrZone(a);
+        if (String(zone) !== filterHrZone) return false;
+      }
+
+      // Smart Preset filter
+      const isValid = isValidActivity(a) || ((a.sport?.toLowerCase().includes("walk") || a.sport?.toLowerCase().includes("hik")) && a.duration_s >= 300 && a.distance_m >= 800);
+      if (smartPreset === "valid" && !isValid) return false;
+      if (smartPreset === "glitches" && isValid) return false;
+      if (smartPreset === "long" && a.distance_m < 12000) return false;
+      if (smartPreset === "short" && a.distance_m >= 6000) return false;
+
       return true;
     });
-  }, [activities, filterSport, minDurationMinutes, maxDurationMinutes, dateFrom, dateTo, searchQuery]);
+  }, [activities, filterSport, minDurationMinutes, maxDurationMinutes, dateFrom, dateTo, searchQuery, minDistance, maxDistance, smartPreset, filterHrZone, distanceUnit]);
 
   const validActivities = useMemo(() => {
     return activities.filter(isValidActivity);
@@ -1080,9 +1111,11 @@ export function Dashboard({ onLogout }: Props) {
     setDateFrom(undefined); setDateTo(undefined);
     setMinDurationMinutes(""); setMaxDurationMinutes("");
     setFilterSport("all"); setSearchQuery("");
+    setMinDistance(""); setMaxDistance("");
+    setSmartPreset("all"); setFilterHrZone("all");
   }
 
-  const hasFilters = filterSport !== "all" || dateFrom || dateTo || minDurationMinutes || maxDurationMinutes || searchQuery;
+  const hasFilters = filterSport !== "all" || dateFrom || dateTo || minDurationMinutes || maxDurationMinutes || searchQuery || minDistance !== "" || maxDistance !== "" || smartPreset !== "all" || filterHrZone !== "all";
   const importDisplayIndex = importProgress
     ? (importProgress.status === "processing"
         ? (importProgress.currentIndex ?? importProgress.completed)
@@ -1357,10 +1390,90 @@ export function Dashboard({ onLogout }: Props) {
               {isFilterOpen && (
                 <div className="section-body">
                   <div className="filter-fields">
-                    <label>{t("sidebar.sport")}<select value={filterSport} onChange={(e) => setFilterSport(e.target.value)}>
-                      <option value="all">{t("sidebar.allSports")}</option>
-                      {sports.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select></label>
+                    {/* Sport Selection Chips */}
+                    <div className="filter-group">
+                      <span className="filter-group-title">{t("sidebar.sport")}</span>
+                      <div className="chips-container">
+                        <button
+                          type="button"
+                          className={`filter-chip ${filterSport === "all" ? "active-sport" : ""}`}
+                          onClick={() => setFilterSport("all")}
+                        >
+                          🎯 {t("sidebar.allSports")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${filterSport === "running" ? "active-sport" : ""}`}
+                          onClick={() => setFilterSport(filterSport === "running" ? "all" : "running")}
+                        >
+                          🏃 Running
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-chip ${filterSport === "walking" ? "active-sport" : ""}`}
+                          onClick={() => setFilterSport(filterSport === "walking" ? "all" : "walking")}
+                        >
+                          🚶 Walking
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* HR Zone Focus Chips */}
+                    <div className="filter-group">
+                      <span className="filter-group-title">HR Zone Focus</span>
+                      <div className="chips-container">
+                        <button
+                          type="button"
+                          className={`filter-chip ${filterHrZone === "all" ? "active-sport" : ""}`}
+                          onClick={() => setFilterHrZone("all")}
+                          style={{ borderRadius: "20px", fontSize: "0.72rem", padding: "0.24rem 0.6rem" }}
+                        >
+                          All
+                        </button>
+                        {[
+                          { id: "1", label: "Z1 Recovery", colorClass: "hz-1" },
+                          { id: "2", label: "Z2 Base", colorClass: "hz-2" },
+                          { id: "3", label: "Z3 Tempo", colorClass: "hz-3" },
+                          { id: "4", label: "Z4 Threshold", colorClass: "hz-4" },
+                          { id: "5", label: "Z5 VO2 Max", colorClass: "hz-5" }
+                        ].map((zone) => (
+                          <button
+                            key={zone.id}
+                            type="button"
+                            className={`hr-zone-chip ${zone.colorClass} ${filterHrZone === zone.id ? "active" : ""}`}
+                            onClick={() => setFilterHrZone(filterHrZone === zone.id ? "all" : zone.id)}
+                            title={`Average heart rate in ${zone.label} bounds`}
+                          >
+                            {zone.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Smart Presets Chips */}
+                    <div className="filter-group">
+                      <span className="filter-group-title">Smart Presets</span>
+                      <div className="chips-container">
+                        {[
+                          { id: "all", label: "All Logs" },
+                          { id: "valid", label: "✅ Valid Only" },
+                          { id: "glitches", label: "⚠️ GPS Warmups (<0.8km)" },
+                          { id: "long", label: "🏆 Long Runs (≥12km)" },
+                          { id: "short", label: "🧘 Recoveries (<6km)" }
+                        ].map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            className={`filter-chip preset-chip ${smartPreset === preset.id ? "active-preset" : ""}`}
+                            onClick={() => setSmartPreset(preset.id)}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Date Range */}
                     <label>
                       {t("sidebar.dateRange")}
                       <div className="filter-date-wrapper" style={{ display: "flex", gap: "8px" }}>
@@ -1402,6 +1515,8 @@ export function Dashboard({ onLogout }: Props) {
                         </div>
                       </div>
                     </label>
+
+                    {/* Duration Range */}
                     <label>
                       {t("sidebar.durationMinutes")}
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
@@ -1410,6 +1525,18 @@ export function Dashboard({ onLogout }: Props) {
                         <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder={t("sidebar.max")} value={maxDurationMinutes} onChange={(e) => setMaxDurationMinutes(e.target.value)} />
                       </div>
                     </label>
+
+                    {/* Distance Range */}
+                    <label>
+                      {`Distance (${distanceLabel(distanceUnit)})`}
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.1" placeholder={t("sidebar.min")} value={minDistance} onChange={(e) => setMinDistance(e.target.value)} />
+                        <span style={{ color: "var(--text-muted)" }}>—</span>
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.1" placeholder={t("sidebar.max")} value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} />
+                      </div>
+                    </label>
+
+                    {/* Reset Button */}
                     <div className="filter-actions"><button className="btn-secondary" style={{ flex: 1 }} onClick={clearFilters}>{t("sidebar.reset")}</button></div>
                   </div>
                 </div>

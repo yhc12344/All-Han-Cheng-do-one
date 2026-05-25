@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import type { Activity } from "../types";
 import { distanceLabel } from "../lib/units";
+import { debounce } from "../lib/debounce";
 
 interface PlannedWorkout {
   id: string;
@@ -32,6 +33,12 @@ export function TrainingScheduler({
     return Number(localStorage.getItem("fit_sched_target_dur") ?? 4);
   });
 
+  // Training Plan States
+  const [raceName, setRaceName] = useState("BYD Singapore Marathon");
+  const [raceDate, setRaceDate] = useState("2026-12-06");
+  const [targetTime, setTargetTime] = useState("3:30:00");
+  const [runningDays, setRunningDays] = useState<number[]>([2, 4, 6, 0]); // default: Tue, Thu, Sat, Sun
+
   // Planned workouts list (persisted in localStorage)
   const [plannedWorkouts, setPlannedWorkouts] = useState<PlannedWorkout[]>(() => {
     const raw = localStorage.getItem("fit_sched_planned");
@@ -47,19 +54,32 @@ export function TrainingScheduler({
     ];
   });
 
-  // Save to localStorage whenever state changes
+  // Debounced planned workouts saver
+  const savePlannedWorkouts = useMemo(() => {
+    return debounce((workouts: PlannedWorkout[]) => {
+      localStorage.setItem("fit_sched_planned", JSON.stringify(workouts));
+    }, 500);
+  }, []);
+
   useEffect(() => {
-    localStorage.setItem("fit_sched_planned", JSON.stringify(plannedWorkouts));
-  }, [plannedWorkouts]);
+    savePlannedWorkouts(plannedWorkouts);
+  }, [plannedWorkouts, savePlannedWorkouts]);
 
   const showGeneratePrompt = useMemo(() => {
     return !plannedWorkouts.some(p => p.dateStr >= "2026-05-25");
   }, [plannedWorkouts]);
 
+  // Debounced target parameters saver
+  const saveTargetParams = useMemo(() => {
+    return debounce((dist: number, dur: number) => {
+      localStorage.setItem("fit_sched_target_dist", String(dist));
+      localStorage.setItem("fit_sched_target_dur", String(dur));
+    }, 500);
+  }, []);
+
   useEffect(() => {
-    localStorage.setItem("fit_sched_target_dist", String(targetDistanceKm));
-    localStorage.setItem("fit_sched_target_dur", String(targetDurationHours));
-  }, [targetDistanceKm, targetDurationHours]);
+    saveTargetParams(targetDistanceKm, targetDurationHours);
+  }, [targetDistanceKm, targetDurationHours, saveTargetParams]);
 
   // Modal State for adding/scheduling workouts
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -271,6 +291,47 @@ export function TrainingScheduler({
     return targetDurationHours;
   }, [autoSyncTargets, activePlanMeta, plannedWorkouts, currentWeekDates, targetDurationHours]);
 
+  // Unit-aware displayed target
+  const displayedDistanceGoal = useMemo(() => {
+    if (autoSyncTargets && activePlanMeta.hasPlan) {
+      return effectiveDistanceGoal;
+    }
+    if (distanceUnit === "mi") {
+      return Number((targetDistanceKm * 0.621371).toFixed(1));
+    }
+    return targetDistanceKm;
+  }, [effectiveDistanceGoal, targetDistanceKm, distanceUnit, autoSyncTargets, activePlanMeta]);
+
+  const handleTargetDistanceChange = (val: number) => {
+    if (distanceUnit === "mi") {
+      setTargetDistanceKm(Number((val / 0.621371).toFixed(1)));
+    } else {
+      setTargetDistanceKm(val);
+    }
+  };
+
+  // 4-week rolling average running volume for suggestions
+  const fourWeekAvgKm = useMemo(() => {
+    const nowTs = new Date().getTime();
+    const fourWeeksAgoTs = nowTs - 28 * 24 * 60 * 60 * 1000;
+    const recent = activities.filter(a => {
+      const t = new Date(a.start_ts_utc).getTime();
+      return t >= fourWeeksAgoTs && t <= nowTs && a.sport?.toLowerCase() === "running";
+    });
+    const totalM = recent.reduce((sum, a) => sum + (a.distance_m || 0), 0);
+    return (totalM / 1000) / 4;
+  }, [activities]);
+
+  const suggestedDistanceGoal = useMemo(() => {
+    const suggestedKm = fourWeekAvgKm * 1.1; // 10% above rolling average
+    if (distanceUnit === "mi") {
+      return Math.round(suggestedKm * 0.621371);
+    }
+    return Math.round(suggestedKm);
+  }, [fourWeekAvgKm, distanceUnit]);
+
+  const showSuggested = fourWeekAvgKm > 0.5;
+
   // Aggregate stats of current week (Monday to Sunday sequence)
   const weekStats = useMemo(() => {
     const today = new Date();
@@ -318,6 +379,70 @@ export function TrainingScheduler({
     };
   }, [activities, plannedWorkouts, distanceUnit, effectiveDistanceGoal, effectiveDurationGoal]);
 
+  // Aggregate stats of previous week for visual comparison
+  const lastWeekStats = useMemo(() => {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - (day === 0 ? 6 : day - 1) - 7;
+    const lastWeekStart = new Date(today.setDate(diff));
+    const weekDates: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(lastWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+      weekDates.push(d.toISOString().slice(0, 10));
+    }
+
+    let actualDistM = 0;
+    activities.forEach(a => {
+      const start = a.start_ts_utc.slice(0, 10);
+      if (weekDates.includes(start)) {
+        actualDistM += a.distance_m;
+      }
+    });
+
+    const scale = distanceUnit === "km" ? 1000 : 1609.34;
+    const actualDistScaled = actualDistM / scale;
+
+    let lastWeekTarget = targetDistanceKm;
+    if (autoSyncTargets && activePlanMeta.hasPlan) {
+      let plannedM = 0;
+      plannedWorkouts.forEach(p => {
+        if (weekDates.includes(p.dateStr)) {
+          plannedM += p.distanceM;
+        }
+      });
+      if (plannedM > 0) {
+        lastWeekTarget = Number((plannedM / scale).toFixed(1));
+      }
+    }
+
+    if (distanceUnit === "mi" && !autoSyncTargets) {
+      lastWeekTarget = Number((targetDistanceKm * 0.621371).toFixed(1));
+    }
+
+    const percentage = lastWeekTarget > 0 ? Math.min(100, Math.round((actualDistScaled / lastWeekTarget) * 100)) : 0;
+
+    return {
+      actualDistance: actualDistScaled,
+      targetDistance: lastWeekTarget,
+      percentage
+    };
+  }, [activities, plannedWorkouts, distanceUnit, autoSyncTargets, activePlanMeta, targetDistanceKm]);
+
+  // Motivational Micro-label instead of generic 0%
+  const centerRingText = useMemo(() => {
+    const totalPercentage = Math.round((weekStats.distPercentage + weekStats.durPercentage) / 2);
+    if (totalPercentage > 0) {
+      return { value: `${totalPercentage}%`, isRest: false };
+    }
+    const today = new Date();
+    const dayLabels = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const currentDayIdx = today.getDay();
+    if (!runningDays.includes(currentDayIdx)) {
+      return { value: "REST", isRest: true };
+    }
+    return { value: dayLabels[currentDayIdx], isRest: false };
+  }, [weekStats, runningDays]);
+
   // Visual Apple-Style rings calculations
   const ringRadius = 45;
   const strokeWidth = 10;
@@ -326,11 +451,7 @@ export function TrainingScheduler({
   const distDashOffset = circumference - (weekStats.distPercentage / 100) * circumference;
   const durDashOffset = circumference - (weekStats.durPercentage / 100) * circumference;
 
-  // Training Plan States
-  const [raceName, setRaceName] = useState("BYD Singapore Marathon");
-  const [raceDate, setRaceDate] = useState("2026-12-06");
-  const [targetTime, setTargetTime] = useState("3:30:00");
-  const [runningDays, setRunningDays] = useState<number[]>([2, 4, 6, 0]); // default: Tue, Thu, Sat, Sun
+
 
   // Determine user's average running speed from history
   const userAvgSpeedMps = useMemo(() => {
@@ -343,9 +464,9 @@ export function TrainingScheduler({
     return totalDur > 0 ? totalDist / totalDur : null;
   }, [activities]);
 
-  const handleGenerateAIPlan = () => {
+  const handleGenerateAIPlan = (silent = false) => {
     if (!raceDate) {
-      alert("Please select your target Race Date first!");
+      if (!silent) alert("Please select your target Race Date first!");
       return;
     }
 
@@ -495,8 +616,17 @@ export function TrainingScheduler({
     }
 
     setPlannedWorkouts(newPlanned);
-    alert(`Successfully generated a personalized ${numWeeks}-week Running Training Plan for your target ${raceLabel} on the calendar!`);
+    if (!silent) {
+      alert(`Successfully generated a personalized ${numWeeks}-week Running Training Plan for your target ${raceLabel} on the calendar!`);
+    }
   };
+
+  useEffect(() => {
+    const hasAIWorkouts = plannedWorkouts.some(p => p.id.startsWith("ai-"));
+    if (!hasAIWorkouts) {
+      handleGenerateAIPlan(true);
+    }
+  }, []);
 
   const handleResetCalendar = () => {
     if (window.confirm("Are you sure you want to clear all planned workouts from your calendar? This cannot be undone.")) {
@@ -613,7 +743,7 @@ export function TrainingScheduler({
 
           <div style={{ display: "flex", alignItems: "center", marginTop: "0.5rem" }}>
             <button
-              onClick={handleGenerateAIPlan}
+              onClick={() => handleGenerateAIPlan()}
               style={{
                 background: "#5f7e39",
                 color: "#fff",
@@ -700,8 +830,8 @@ export function TrainingScheduler({
               <input
                 type="number"
                 disabled={autoSyncTargets && activePlanMeta.hasPlan}
-                value={effectiveDistanceGoal}
-                onChange={(e) => setTargetDistanceKm(Math.max(1, Number(e.target.value)))}
+                value={displayedDistanceGoal}
+                onChange={(e) => handleTargetDistanceChange(Math.max(1, Number(e.target.value)))}
                 style={{
                   padding: "0.4rem 0.6rem",
                   borderRadius: "6px",
@@ -711,6 +841,11 @@ export function TrainingScheduler({
                   opacity: (autoSyncTargets && activePlanMeta.hasPlan) ? 0.7 : 1
                 }}
               />
+              {showSuggested && !autoSyncTargets && (
+                <span style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "2px" }}>
+                  Suggested: {suggestedDistanceGoal} {distanceLabel(distanceUnit)} based on your recent training
+                </span>
+              )}
             </label>
             <label style={{ fontSize: "11px", display: "flex", flexDirection: "column", gap: "0.25rem", color: "var(--text-secondary)" }}>
               Duration Goal (Hours)
@@ -779,8 +914,17 @@ export function TrainingScheduler({
             </svg>
             
             {/* Center metric indicator */}
-            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: "14px", fontWeight: "bold" }}>
-              {Math.round((weekStats.distPercentage + weekStats.durPercentage) / 2)}%
+            <div style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              fontSize: centerRingText.isRest ? "10px" : "14px",
+              fontWeight: "bold",
+              color: centerRingText.isRest ? "var(--text-muted)" : "var(--text)",
+              letterSpacing: centerRingText.isRest ? "0.5px" : "normal"
+            }}>
+              {centerRingText.value}
             </div>
           </div>
 
@@ -792,6 +936,12 @@ export function TrainingScheduler({
             <div style={{ display: "flex", justifyItems: "center", gap: "6px" }}>
               <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#8b5cf6", marginTop: "3px" }} />
               <span>Duration: <strong>{weekStats.actualDuration.toFixed(1)}</strong> / {effectiveDurationGoal} hours ({weekStats.durPercentage}%)</span>
+            </div>
+
+            {/* Last week reference */}
+            <div style={{ marginTop: "0.4rem", padding: "6px 10px", background: "rgba(255,255,255,0.015)", border: "1px dashed var(--border)", borderRadius: "6px", fontSize: "10.5px", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Last week:</span>
+              <strong>{lastWeekStats.actualDistance.toFixed(1)} {distanceLabel(distanceUnit)} ({lastWeekStats.percentage}%)</strong>
             </div>
           </div>
         </section>
@@ -834,7 +984,34 @@ export function TrainingScheduler({
 
         {/* 7-column Calendar Header */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", fontWeight: "bold", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted)", paddingBottom: "4px" }}>
-          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+          {[
+            { idx: 0, label: "Sun" },
+            { idx: 1, label: "Mon" },
+            { idx: 2, label: "Tue" },
+            { idx: 3, label: "Wed" },
+            { idx: 4, label: "Thu" },
+            { idx: 5, label: "Fri" },
+            { idx: 6, label: "Sat" }
+          ].map(day => {
+            const isPreferred = runningDays.includes(day.idx);
+            return (
+              <span
+                key={day.idx}
+                style={{
+                  textAlign: "center",
+                  padding: "4px 0",
+                  borderRadius: "4px",
+                  background: isPreferred ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
+                  color: isPreferred ? "var(--accent)" : "var(--text-muted)",
+                  border: isPreferred ? "1px solid color-mix(in srgb, var(--accent) 20%, transparent)" : "1px solid transparent",
+                  boxShadow: isPreferred ? "0 0 6px color-mix(in srgb, var(--accent) 8%, transparent)" : "none",
+                  transition: "all 200ms ease"
+                }}
+              >
+                {day.label}
+              </span>
+            );
+          })}
         </div>
 
         {/* Grid Blocks */}

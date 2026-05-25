@@ -41,36 +41,7 @@ export type RecordPoint = {
 
 ---
 
-## ⛰️ 2. Grade Adjusted Pace (GAP) on Activity Charts
-
-Running on hills creates a mismatch between heart rate/power and actual flat-ground pace. GAP normalizes uphill/downhill sections into flat-ground equivalent paces.
-
-### A. The GAP Algorithm (`src/lib/analytics.ts`)
-Based on Minetti's polynomial energy-cost model:
-
-```typescript
-export function calculateGradeAdjustedPace(speedMps: number, gradeFraction: number): number {
-  if (speedMps <= 0) return 0;
-  const i = gradeFraction;
-  const flatCost = 3.6;
-  const hillCost = 155.4*i**5 - 30.4*i**4 - 43.3*i**3 + 46.3*i**2 + 19.5*i + 3.6;
-  return speedMps * (hillCost / flatCost); // Grade Adjusted Speed
-}
-```
-
-### B. Per-Trackpoint Grade Calculation
-For each `RecordPoint`, compute grade from adjacent points:
-```
-grade = Δaltitude_m / Δdistance_m
-```
-Pass to `calculateGradeAdjustedPace()` to derive GAP for each second.
-
-### C. Add to `ActivityChart.tsx`
-Add a "Grade Adjusted Pace" optional series toggle to the existing time-series chart so athletes can overlay actual vs. effort-equivalent pacing.
-
----
-
-## 💤 3. All-Day Wellness & Objective Readiness Sync
+## 💤 2. All-Day Wellness & Objective Readiness Sync
 
 Currently, daily wellness projections are estimated from training load. To replace estimates with real measured data:
 
@@ -90,7 +61,7 @@ Once true wellness records are in the DB, query and overlay them on the readines
 
 ---
 
-## 📡 4. Live GPS Track Upload & Real-Time Sync
+## 📡 3. Live GPS Track Upload & Real-Time Sync
 
 ### A. Garmin Connect Auto-Sync
 Extend `scripts/sync_garmin.ps1` to poll Garmin Connect for new activities after every workout (via OAuth2 token stored in the system keychain), download FIT files, and trigger a Tauri `import_activity` command automatically.
@@ -103,7 +74,7 @@ For users who want in-progress run stats:
 
 ---
 
-## 📊 5. Advanced Training Block Periodization Planner
+## 📊 4. Advanced Training Block Periodization Planner
 
 Building on the existing `TrainingScheduler.tsx`:
 
@@ -121,7 +92,7 @@ Building on the existing `TrainingScheduler.tsx`:
 
 ---
 
-## 🌡️ 6. Environmental Performance Correction
+## 🌡️ 5. Environmental Performance Correction
 
 ### A. WBGT Heat Stress Model
 Parse `temperature_c` from FIT trackpoints (already stored). Apply the Wet-Bulb Globe Temperature approximation and adjust expected pace:
@@ -133,12 +104,14 @@ Use the existing `altitude_m` field to compute average altitude above 1000m and 
 
 ---
 
-## 🎉 7. Resolved Roadmap Milestone: Synced Multi-Chart Hover Tooltips
+## 🎉 6. Resolved Roadmap Milestones
 
-We have fully designed and implemented a custom programmatic hover-sync system across all timeline charts (Activity view, Compare runs, and Insights timeline).
-* **The Challenge**: Native ECharts `.connect()` connections would crash when connecting graphs with mismatched series or dimensions (e.g. secondary Y-axis on power vs. single Y-axis on speed).
-* **The Solution**: Removed native connections entirely. Created a custom coordinate axis pointer listener and programmatic `showTip` / `hideTip` dispatch loop.
-* **Layout Alignment**: Standardized all margins to `{ left: 54, right: 54, top: 42, bottom: 46 }` so the vertical cursor lines align perfectly down the stacked timeline panels.
+### A. Grade Adjusted Pace (GAP) on Activity Charts
+* **Implemented**: Deployed in `ActivityChart.tsx` and `src/lib/analytics.ts`. Normalizes uphill/downhill sections into flat-ground equivalent paces using Minetti's energy-cost model.
+* **Outcome**: A beautiful grade-adjusted pace curve overlays heart rate and speed timelines to show true cardiovascular effort on rolling terrains.
+
+### B. Synced Multi-Chart Hover Tooltips
+* **Implemented**: Deployed in `ActivityChart.tsx` and `CompareCharts.tsx`. A programmatic coordinates hover-sync system links cursors and data reads in lockstep across independent ECharts panels, completely bypassing native grouping conflicts.
 
 ---
 

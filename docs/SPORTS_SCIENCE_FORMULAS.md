@@ -76,8 +76,10 @@ This formula is computed dynamically against all your running personal record di
 ### D. Garmin FIT Telemetry Offset Analysis
 When both Garmin FIT direct VO2 Max telemetry (Message 140) and Jack Daniels' PR VDOT estimation are available, the dashboard calculates the **physiological gap**:
 $$\text{VDOT Offset} = \text{VO2 Max}_{\text{Garmin}} - \text{VDOT}_{\text{PRs}}$$
-* **$\text{VDOT Offset} > 0$**: Represents your anaerobic cardiorespiratory reserve. Garmin's sub-maximal heart rate estimates project a higher potential than achieved by PR flat-ground efforts, indicating potential gains under peaked racing conditions.
-* **$\text{VDOT Offset} < 0$**: Suggests superior flat-ground mechanical running economy (VDOT) or a highly-trained anaerobic cost performance that exceeds the direct heart-rate estimated capacity.
+
+*   **Garmin VO2 Max**: Represents the sub-maximal heart rate physiological ceiling projection. Because Garmin watches rely on sub-maximal HR-to-pace modeling, they typically overestimate actual racing potential by 8–15% in recreational athletes.
+*   **PR VDOT**: Jack Daniels' performance-based VDOT acts as the actual, actionable cardiorespiratory metric from which training paces and race strategies should be built.
+*   **VDOT Offset**: Highlights the difference between your theoretical cardiovascular limit (Garmin) and your realized mechanical/aerobic performance (PR VDOT), encouraging consistent base development to bridge this physiological gap.
 
 ---
 

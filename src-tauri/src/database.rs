@@ -177,6 +177,9 @@ impl Database {
                         [],
                 )?;
 
+        // Repair mis-geocoded border locations and generic names with high-fidelity Singapore planning area neighborhoods
+        self.repair_singapore_activity_names(&conn)?;
+
         // Re-assert indexes after any table rebuild migration.
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_records_activity_time ON records(activity_id, timestamp_ms)",
@@ -725,4 +728,121 @@ impl Database {
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(())
     }
+
+    fn repair_singapore_activity_names(&self, conn: &Connection) -> Result<()> {
+        let mut stmt = conn.prepare(
+            "SELECT id, start_latitude, start_longitude, sport, activity_name FROM activities"
+        )?;
+        
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let lat: Option<f64> = row.get(1)?;
+            let lon: Option<f64> = row.get(2)?;
+            let sport: String = row.get(3)?;
+            let name: String = row.get(4)?;
+            Ok((id, lat, lon, sport, name))
+        })?;
+        
+        let mut to_update = Vec::new();
+        for r in rows {
+            let (id, lat_opt, lon_opt, sport, name) = r?;
+            if let (Some(lat), Some(lon)) = (lat_opt, lon_opt) {
+                // If coordinate is in Singapore
+                if lat >= 1.13 && lat <= 1.48 && lon >= 103.59 && lon <= 104.1 {
+                    let is_generic_singapore = name.starts_with("Singapore");
+                    let is_border_malaysia = name.contains("Kampung Pasir Gudang");
+                    if is_generic_singapore || is_border_malaysia {
+                        if let Some(nh) = get_singapore_neighbourhood(lat, lon) {
+                            let sport_label = db_title_case_sport(&sport);
+                            let new_name = format!("{}, Singapore — {}", nh, sport_label);
+                            if new_name != name {
+                                to_update.push((id, new_name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if !to_update.is_empty() {
+            tracing::info!(count = to_update.len(), "repairing mis-geocoded Singapore activity names");
+            let mut update_stmt = conn.prepare("UPDATE activities SET activity_name = ?1 WHERE id = ?2")?;
+            for (id, new_name) in to_update {
+                update_stmt.execute(params![new_name, id])?;
+            }
+        }
+        
+        Ok(())
+    }
+}
+
+fn db_title_case_sport(sport: &str) -> String {
+    if sport.is_empty() {
+        return "Activity".to_string();
+    }
+    let mut chars = sport.chars();
+    let Some(first) = chars.next() else {
+        return "Activity".to_string();
+    };
+    first.to_uppercase().collect::<String>() + chars.as_str()
+}
+
+fn db_haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let r = 6_371_000.0_f64;
+    let to_rad = std::f64::consts::PI / 180.0;
+    let dlat = (lat2 - lat1) * to_rad;
+    let dlon = (lon2 - lon1) * to_rad;
+    let lat1r = lat1 * to_rad;
+    let lat2r = lat2 * to_rad;
+    let a = (dlat / 2.0).sin().powi(2) + lat1r.cos() * lat2r.cos() * (dlon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    r * c
+}
+
+fn get_singapore_neighbourhood(lat: f64, lon: f64) -> Option<&'static str> {
+    let nhs = [
+        ("Woodlands", 1.4368, 103.7865),
+        ("Punggol", 1.3984, 103.9072),
+        ("Sengkang", 1.3916, 103.8954),
+        ("Yishun", 1.4295, 103.8350),
+        ("Jurong West", 1.3396, 103.7073),
+        ("Tampines", 1.3525, 103.9447),
+        ("Pasir Ris", 1.3721, 103.9474),
+        ("Changi", 1.3644, 103.9915),
+        ("Bedok", 1.3236, 103.9273),
+        ("Ang Mo Kio", 1.3691, 103.8454),
+        ("Bishan", 1.3526, 103.8468),
+        ("Toa Payoh", 1.3343, 103.8563),
+        ("Bukit Timah", 1.3294, 103.7956),
+        ("Clementi", 1.3150, 103.7652),
+        ("Queenstown", 1.2942, 103.8059),
+        ("Bukit Merah", 1.2819, 103.8239),
+        ("Downtown Core", 1.2874, 103.8530),
+        ("Newton", 1.3048, 103.8318),
+        ("Geylang", 1.3201, 103.8918),
+        ("Hougang", 1.3713, 103.8865),
+        ("Kallang", 1.3100, 103.8651),
+        ("Novena", 1.3205, 103.8437),
+        ("Choa Chu Kang", 1.3840, 103.7470),
+        ("Bukit Batok", 1.3590, 103.7526),
+        ("Sembawang", 1.4480, 103.8200),
+        ("Kranji", 1.4250, 103.7460),
+        ("Lim Chu Kang", 1.4340, 103.7020),
+        ("Tuas", 1.2940, 103.6210),
+        ("Sentosa", 1.2494, 103.8303),
+        ("MacRitchie", 1.3690, 103.8020),
+    ];
+
+    let mut closest_name = None;
+    let mut min_dist = f64::MAX;
+
+    for (name, nh_lat, nh_lon) in nhs {
+        let dist = db_haversine_m(lat, lon, nh_lat, nh_lon);
+        if dist < min_dist {
+            min_dist = dist;
+            closest_name = Some(name);
+        }
+    }
+
+    closest_name
 }

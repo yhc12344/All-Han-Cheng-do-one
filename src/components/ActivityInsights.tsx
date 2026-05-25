@@ -96,6 +96,16 @@ export function ActivityInsights({
   const t0 = records[0]?.timestamp_ms ?? 0;
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
+
+  const prevRecordsLengthRef = useRef(records.length);
+  const prevT0Ref = useRef(t0);
+  
+  let notMerge = false;
+  if (prevRecordsLengthRef.current !== records.length || prevT0Ref.current !== t0) {
+    notMerge = true;
+    prevRecordsLengthRef.current = records.length;
+    prevT0Ref.current = t0;
+  }
   const timeline = records.map((r, i) => {
     const prev = i > 0 ? records[i - 1] : undefined;
     const dt = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
@@ -712,36 +722,36 @@ export function ActivityInsights({
     <section className="insight-grid">
       <article className="panel">
         <h3>{tr("insights.speedTrend")}</h3>
-        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.heartRateZoneTime")}</h3>
-          <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
         </article>
       )}
       <article className="panel">
         <h3>{hasPowerData ? tr("insights.cadenceAndPower") : tr("insights.cadence")}</h3>
-        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
       </article>
       {hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.hrHistogram")}</h3>
-          <ReactECharts option={hrHistogramOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={hrHistogramOption} onChartReady={enableChartWheelPageScroll} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
         </article>
       )}
       <article className="panel">
         <h3>{tr("insights.elevation")}</h3>
-        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>{tr("insights.effortHeatmap")}</h3>
-        <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.powerVsHeartRate")}</h3>
-          <ReactECharts option={scatterOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={scatterOption} onChartReady={enableChartWheelPageScroll} notMerge={notMerge} style={{ height: 280, width: "100%" }} />
         </article>
       )}
     </section>

@@ -37,6 +37,16 @@ export function ActivityChart({
   const chartInstancesRef = useRef<any[]>([]);
   const isDispatchingRef = useRef(false);
 
+  const prevRecordsLengthRef = useRef(records.length);
+  const prevT0Ref = useRef(t0);
+  
+  let notMerge = false;
+  if (prevRecordsLengthRef.current !== records.length || prevT0Ref.current !== t0) {
+    notMerge = true;
+    prevRecordsLengthRef.current = records.length;
+    prevT0Ref.current = t0;
+  }
+
   useEffect(() => {
     chartInstancesRef.current = [];
   }, [records]);
@@ -80,8 +90,39 @@ export function ActivityChart({
     return [relMs, paceMinPerUnit, r.timestamp_ms];
   });
 
+  const gapSeriesData = records.map((r, i) => {
+    const relMs = r.timestamp_ms - t0;
+    let grade = 0;
+    if (i >= 6) {
+      const prev = records[i - 6];
+      const distDiff = (r.distance_m ?? 0) - (prev.distance_m ?? 0);
+      const altDiff = (r.altitude_m ?? 0) - (prev.altitude_m ?? 0);
+      if (distDiff > 2.0) {
+        grade = Math.max(-0.4, Math.min(0.4, altDiff / distDiff));
+      }
+    }
+    const prevPoint = i > 0 ? records[i - 1] : undefined;
+    const dtS = prevPoint ? (r.timestamp_ms - prevPoint.timestamp_ms) / 1000 : 0;
+    const derivedSpeed =
+      (!r.speed_m_s && prevPoint && typeof r.distance_m === "number" && typeof prevPoint.distance_m === "number" && dtS > 0)
+        ? Math.max(0, (r.distance_m - prevPoint.distance_m) / dtS)
+        : undefined;
+    const speedMs = r.speed_m_s ?? derivedSpeed ?? 0;
+    
+    // Minetti GAP formula
+    const flatCost = 3.6;
+    const hillCost = 155.4 * Math.pow(grade, 5) - 30.4 * Math.pow(grade, 4) - 43.3 * Math.pow(grade, 3) + 46.3 * Math.pow(grade, 2) + 19.5 * grade + 3.6;
+    const speedRatio = hillCost / flatCost;
+    const gapSpeedMps = speedMs * speedRatio;
+    
+    const gapPaceMinPerKm = gapSpeedMps && gapSpeedMps > 0.2 ? 1000 / (gapSpeedMps * 60) : null;
+    const gapPaceMinPerUnit = gapPaceMinPerKm == null ? null : convertPaceMinPerKm(gapPaceMinPerKm, distanceUnit);
+    return [relMs, gapPaceMinPerUnit, r.timestamp_ms];
+  });
+
   const hrSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(hrSeriesData, 1, smoothWindow) : hrSeriesData;
   const paceSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(paceSeriesData, 1, smoothWindow) : paceSeriesData;
+  const gapSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(gapSeriesData, 1, smoothWindow) : gapSeriesData;
 
   const lapMarkers = lapTimestampsUtc
     .slice(1)
@@ -225,7 +266,7 @@ export function ActivityChart({
       }
     },
     legend: {
-      data: [t("chart.pace")],
+      data: [t("chart.pace"), "Grade Adjusted Pace (GAP)"],
       textStyle: { color: axisColor, fontSize: 12 },
       top: 0,
     },
@@ -264,7 +305,7 @@ export function ActivityChart({
         smooth: smoothGraphs,
         showSymbol: false,
         lineStyle: { width: 2, color: "#f43f5e" },
-        areaStyle: { color: isDark ? "rgba(244, 63, 94, 0.1)" : "rgba(244, 63, 94, 0.12)" },
+        areaStyle: { color: isDark ? "rgba(244, 63, 94, 0.08)" : "rgba(244, 63, 94, 0.10)" },
         sampling: smoothGraphs ? "lttb" : undefined,
         data: paceSeriesSmoothed,
         markLine: lapMarkers.length ? {
@@ -275,6 +316,15 @@ export function ActivityChart({
           data: lapMarkers,
         } : undefined,
       },
+      {
+        name: "Grade Adjusted Pace (GAP)",
+        type: "line",
+        smooth: smoothGraphs,
+        showSymbol: false,
+        lineStyle: { width: 1.75, color: "#8b5cf6", type: "dashed" },
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: gapSeriesSmoothed,
+      }
     ],
   };
 
@@ -369,8 +419,8 @@ export function ActivityChart({
 
   return (
     <div style={{ display: "grid", gap: 12, minWidth: 0, width: "100%", overflow: "hidden" }}>
-      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
-      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
+      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge={notMerge} style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
+      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge={notMerge} style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
     </div>
   );
 }

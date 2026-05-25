@@ -29,7 +29,7 @@ function addDays(d: Date, n: number): Date {
 export function ActivityContributionHeatmap({ activities }: Props) {
   const { t } = useTranslation();
 
-  const { weeks, counts, dateActivitiesMap, maxCount, startDate, endDate, longestStreak, currentStreak } = useMemo(() => {
+  const { weeks, counts, dateActivitiesMap, maxCount, startDate, endDate, longestStreak, currentStreak, dateMap } = useMemo(() => {
     const today = startOfDay(new Date());
     
     // Determine target year based on activities (default to 2026 to match mock data)
@@ -49,6 +49,7 @@ export function ActivityContributionHeatmap({ activities }: Props) {
 
     const countMap = new Map<string, number>();
     const actMap = new Map<string, Activity[]>();
+    const dateMap = new Map<string, Date>();
     for (const a of activities) {
       if (!isValidActivity(a)) continue;
       const dt = new Date(a.start_ts_utc);
@@ -71,7 +72,9 @@ export function ActivityContributionHeatmap({ activities }: Props) {
 
     const days: Date[] = [];
     for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 1)) {
-      days.push(new Date(d));
+      const dateObj = new Date(d);
+      days.push(dateObj);
+      dateMap.set(toDateKey(dateObj), dateObj);
     }
 
     const weekChunks: Date[][] = [];
@@ -137,7 +140,8 @@ export function ActivityContributionHeatmap({ activities }: Props) {
       startDate: rangeStart,
       endDate: today,
       longestStreak,
-      currentStreak
+      currentStreak,
+      dateMap
     };
   }, [activities]);
 
@@ -204,6 +208,42 @@ export function ActivityContributionHeatmap({ activities }: Props) {
   const activeDate = hoveredDate || selectedDate || today;
   const activeKey = toDateKey(activeDate);
   const activeActs = dateActivitiesMap.get(activeKey) ?? [];
+
+  const handleGridMouseOver = (e: React.MouseEvent<HTMLDivElement>) => {
+    const cell = (e.target as HTMLElement).closest("[data-date]");
+    if (cell) {
+      const dateStr = cell.getAttribute("data-date");
+      if (dateStr) {
+        const d = dateMap.get(dateStr);
+        if (d) {
+          setHoveredDate(d);
+          return;
+        }
+      }
+    }
+    setHoveredDate(null);
+  };
+
+  const handleGridMouseLeave = () => {
+    setHoveredDate(null);
+  };
+
+  const handleGridClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const cell = (e.target as HTMLElement).closest("[data-date]");
+    if (cell) {
+      const dateStr = cell.getAttribute("data-date");
+      if (dateStr) {
+        const d = dateMap.get(dateStr);
+        if (d) {
+          if (selectedDate && toDateKey(selectedDate) === dateStr) {
+            setSelectedDate(null);
+          } else {
+            setSelectedDate(d);
+          }
+        }
+      }
+    }
+  };
 
   const themes = {
     purple: {
@@ -274,11 +314,11 @@ export function ActivityContributionHeatmap({ activities }: Props) {
         </div>
       </div>
       
-      <div className="heatmap-split-container" style={{ display: "flex", gap: "1rem", width: "100%", flex: 1, minHeight: 0, alignItems: "stretch" }}>
+      <div className="heatmap-split-container" style={{ display: "flex", gap: "1rem", width: "100%", flex: 1, minHeight: 0, alignItems: "stretch", flexWrap: "wrap" }}>
         
         {/* Left Side: Heatmap Grid */}
-        <div className="overview-heatmap-wrap" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", overflowX: "hidden" }}>
-          <div className="overview-heatmap-grid" style={{ minWidth: "640px" }}>
+        <div className="overview-heatmap-wrap" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", overflowX: "auto" }}>
+          <div className="overview-heatmap-grid" style={{ minWidth: "945px" }}>
             <div className="overview-heatmap-months">
               {weeks.map((week, i) => {
                 const d = week[0];
@@ -316,14 +356,23 @@ export function ActivityContributionHeatmap({ activities }: Props) {
                 );
               })}
             </div>
-
+ 
             <div className="overview-heatmap-body">
               <div className="overview-heatmap-daylabels">
                 <span>{t("heatmap.mon")}</span>
+                <span>{t("heatmap.tue")}</span>
                 <span>{t("heatmap.wed")}</span>
+                <span>{t("heatmap.thu")}</span>
                 <span>{t("heatmap.fri")}</span>
+                <span>{t("heatmap.sat")}</span>
+                <span>{t("heatmap.sun")}</span>
               </div>
-              <div className="overview-heatmap-weeks">
+              <div 
+                className="overview-heatmap-weeks"
+                onMouseOver={handleGridMouseOver}
+                onMouseLeave={handleGridMouseLeave}
+                onClick={handleGridClick}
+              >
                 {weeks.map((week, wi) => {
                   const isTodayWeek = week.some(wDate => toDateKey(wDate) === toDateKey(today));
                   return (
@@ -360,6 +409,7 @@ export function ActivityContributionHeatmap({ activities }: Props) {
                         return (
                           <div
                             key={key}
+                            data-date={key}
                             className="overview-heatmap-cell"
                             style={{ 
                               backgroundColor: cellColor(count), 
@@ -376,15 +426,6 @@ export function ActivityContributionHeatmap({ activities }: Props) {
                                   ? `1px solid ${themes[colorTheme].steps[2]}` 
                                   : "none",
                               transition: "transform 100ms ease, box-shadow 100ms ease"
-                            }}
-                            onMouseEnter={() => setHoveredDate(d)}
-                            onMouseLeave={() => setHoveredDate(null)}
-                            onClick={() => {
-                              if (selectedDate && toDateKey(selectedDate) === key) {
-                                  setSelectedDate(null);
-                              } else {
-                                  setSelectedDate(d);
-                              }
                             }}
                           />
                         );
@@ -408,7 +449,8 @@ export function ActivityContributionHeatmap({ activities }: Props) {
         </div>
         {/* Middle Column: Consistency & Streak Stats */}
         <div className="overview-heatmap-stats" style={{
-          width: "200px",
+          width: "220px",
+          flexShrink: 0,
           padding: "0.75rem 0.85rem",
           background: "rgba(255, 255, 255, 0.015)",
           border: "1px solid var(--border)",
@@ -492,7 +534,8 @@ export function ActivityContributionHeatmap({ activities }: Props) {
 
         {/* Right Side: Dedicated Activity Details Panel */}
         <div className="overview-heatmap-details" style={{
-          width: "250px",
+          width: "280px",
+          flexShrink: 0,
           padding: "1rem",
           background: "rgba(168, 85, 247, 0.02)",
           border: "1px solid var(--border)",

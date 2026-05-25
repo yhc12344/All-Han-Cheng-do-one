@@ -1,21 +1,31 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import ReactECharts from "echarts-for-react";
-import { type BestDistanceEffort, predictRaceTimes, generatePacingSplits } from "../lib/analytics";
+import type { Activity } from "../types";
+import { useChartResize } from "../lib/useChartResize";
+import { type BestDistanceEffort, predictRaceTimes, generatePacingSplits, calculateRiegelExponent, isValidActivity } from "../lib/analytics";
 import { distanceLabel } from "../lib/units";
+import { usePinnedWidgetsStore } from "../stores/pinnedWidgetsStore";
 
 export function RacePredictor({
   runningBests,
+  activities,
   distanceUnit,
   theme,
-  pinnedWidgets,
-  togglePinWidget
+  pinnedWidgets: propsPinnedWidgets,
+  togglePinWidget: propsTogglePinWidget
 }: {
   runningBests: BestDistanceEffort[];
+  activities: Activity[];
   distanceUnit: "km" | "mi";
   theme: "light" | "dark";
   pinnedWidgets?: string[];
   togglePinWidget?: (id: string) => void;
 }) {
+  const storePinnedWidgets = usePinnedWidgetsStore((s) => s.pinnedWidgets);
+  const storeTogglePinWidget = usePinnedWidgetsStore((s) => s.togglePinWidget);
+  
+  const pinnedWidgets = propsPinnedWidgets ?? storePinnedWidgets;
+  const togglePinWidget = propsTogglePinWidget ?? storeTogglePinWidget;
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -26,26 +36,57 @@ export function RacePredictor({
   const [pacingStrategy, setPacingStrategy] = useState<"even" | "negative" | "positive">("negative");
   const [selectedAnchorMeters, setSelectedAnchorMeters] = useState<number | null>(null);
 
-  // Resize listener refs
+  // Resize listener using centralized observer hook
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const resizeObserver = new ResizeObserver(() => {
+  const resizableChart = useMemo(() => ({
+    resize: () => {
       const chartInstance = chartRef.current?.getEchartsInstance();
-      if (chartInstance) {
+      if (chartInstance && !chartInstance.isDisposed()) {
         chartInstance.resize();
       }
-    });
+    }
+  }), []);
 
-    resizeObserver.observe(containerRef.current);
+  useChartResize(containerRef, resizableChart);
 
-    return () => {
-      resizeObserver.disconnect();
+  // Calculate rolling 4-week average weekly distance
+  const avgWeeklyKm = useMemo(() => {
+    if (!activities) return 0;
+    const runningActivities = activities.filter(a => 
+      (a.sport?.toLowerCase() === "running" || a.sport?.toLowerCase() === "run") &&
+      isValidActivity(a)
+    );
+    if (!runningActivities.length) return 0;
+    
+    const latestTime = Math.max(...runningActivities.map(a => Date.parse(a.start_ts_utc)));
+    const fourWeeksAgo = latestTime - 28 * 24 * 60 * 60 * 1000;
+    
+    const runsIn4Weeks = runningActivities.filter(a => Date.parse(a.start_ts_utc) >= fourWeeksAgo);
+    const totalDistM = runsIn4Weeks.reduce((sum, a) => sum + a.distance_m, 0);
+    return (totalDistM / 1000) / 4; // average weekly volume in km
+  }, [activities]);
+
+  const exponent = useMemo(() => {
+    return calculateRiegelExponent(avgWeeklyKm);
+  }, [avgWeeklyKm]);
+
+  const pr400m = useMemo(() => {
+    return runningBests.find(b => Math.abs(b.distanceMeters - 400) < 50);
+  }, [runningBests]);
+
+  const speedReserve = useMemo(() => {
+    if (!pr400m) return null;
+    const pr400mPaceSec = pr400m.bestDurationS / (pr400m.distanceMeters / 1000); // sec/km
+    const targetMarathonPaceSec = 298; // 4:58/km
+    const reserve = targetMarathonPaceSec - pr400mPaceSec;
+    return {
+      reserve,
+      prPace: pr400mPaceSec,
+      targetPace: targetMarathonPaceSec
     };
-  }, []);
+  }, [pr400m]);
 
   // Choose the best effort close to 5K/10K as default anchor, or longest PR
   const defaultAnchor = useMemo(() => {
@@ -77,7 +118,7 @@ export function RacePredictor({
     if (!activeAnchor) {
       const base5k = 1500; // 25:00 default
       return standardRaces.map(race => {
-        const riegelSec = base5k * Math.pow(race.meters / 5000, 1.06);
+        const riegelSec = base5k * Math.pow(race.meters / 5000, exponent);
         return {
           distanceMeters: race.meters,
           label: race.label,
@@ -88,8 +129,8 @@ export function RacePredictor({
     }
 
     return standardRaces.map(race => {
-      // Riegel: T2 = T1 * (D2 / D1)^1.06
-      const predictedDurationS = activeAnchor.bestDurationS * Math.pow(race.meters / activeAnchor.distanceMeters, 1.06);
+      // Riegel: T2 = T1 * (D2 / D1)^exponent
+      const predictedDurationS = activeAnchor.bestDurationS * Math.pow(race.meters / activeAnchor.distanceMeters, exponent);
       return {
         distanceMeters: race.meters,
         label: race.label,
@@ -97,7 +138,7 @@ export function RacePredictor({
         predictedPaceSecPerKm: predictedDurationS / (race.meters / 1000)
       };
     });
-  }, [activeAnchor]);
+  }, [activeAnchor, exponent]);
 
   const activePrediction = useMemo(() => {
     return predictions.find(p => Math.abs(p.distanceMeters - targetDistanceM) < 10) 
@@ -285,8 +326,8 @@ export function RacePredictor({
           gap: "0.75rem"
         }}>
           <div>
-            ℹ️ <strong>Riegel Prediction Model</strong>: We project your race potential using a single <strong>anchor performance</strong> as the baseline. 
-            Because Riegel's exponent ($1.06$) is highly accurate, predictions naturally align closely with your actual personal bests for distances you have already raced. 
+            ℹ️ <strong>Volume-Adjusted Riegel Model</strong>: We project your race potential using a single <strong>anchor performance</strong> as the baseline. 
+            To remain physiologically honest under your current weekly volume, we use a volume-gated fatigue exponent: <strong>{exponent.toFixed(2)}</strong> ({avgWeeklyKm >= 50 ? "Aerobically Conditioned" : avgWeeklyKm >= 35 ? "Recreational Base" : avgWeeklyKm >= 20 ? "Developing Base" : "Base-Building focus"}). 
             Select a different anchor below to see how your projected times shift!
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -415,6 +456,47 @@ export function RacePredictor({
               );
             })}
           </div>
+
+          {speedReserve && (
+            <div className="glass-card" style={{ 
+              padding: "1.25rem", 
+              border: "1px solid var(--border)", 
+              borderRadius: "10px", 
+              background: "rgba(168, 85, 247, 0.02)", 
+              textAlign: "left",
+              marginTop: "1.25rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.6rem"
+            }}>
+              <span style={{ fontSize: "10px", fontWeight: "bold", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                ⚡ Performance Profile & Speed Reserve
+              </span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Neuromuscular Headroom:</span>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "#a855f7", marginTop: "2px" }}>
+                    {Math.round(speedReserve.reserve)} s/km
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>400m PR Pace: <strong>{formatPace(speedReserve.prPace)}</strong></span>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Marathon Goal Pace: <strong>{formatPace(speedReserve.targetPace)}</strong></span>
+                </div>
+              </div>
+              <div style={{ 
+                padding: "8px 12px", 
+                background: "rgba(168, 85, 247, 0.04)", 
+                borderLeft: "3.5px solid #a855f7", 
+                borderRadius: "0 6px 6px 0", 
+                fontSize: "11.5px", 
+                lineHeight: "1.4", 
+                color: "var(--text-secondary)" 
+              }}>
+                <strong>Aerobic-Limited:</strong> Your leg speed and neuromuscular capacity are not the bottleneck for your sub 3:30 goal; aerobic base volume is. Focus strictly on building easy, high-consistency aerobic volume (Zone 2).
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Pacing Splits Simulator */}

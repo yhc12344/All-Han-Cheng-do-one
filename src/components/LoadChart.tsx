@@ -1,20 +1,48 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import type { Activity } from "../types";
 import { calculateTrainingLoad } from "../lib/analytics";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
+import { usePinnedWidgetsStore } from "../stores/pinnedWidgetsStore";
+import { useChartResize } from "../lib/useChartResize";
 
 export function LoadChart({ 
   activities, 
   theme,
-  pinnedWidgets,
-  togglePinWidget
+  pinnedWidgets: propsPinnedWidgets,
+  togglePinWidget: propsTogglePinWidget
 }: { 
   activities: Activity[]; 
   theme: "light" | "dark";
   pinnedWidgets?: string[];
   togglePinWidget?: (id: string) => void;
 }) {
+  const storePinnedWidgets = usePinnedWidgetsStore((s) => s.pinnedWidgets);
+  const storeTogglePinWidget = usePinnedWidgetsStore((s) => s.togglePinWidget);
+  
+  const pinnedWidgets = propsPinnedWidgets ?? storePinnedWidgets;
+  const togglePinWidget = propsTogglePinWidget ?? storeTogglePinWidget;
+
+  const prevActivitiesLengthRef = useRef(activities.length);
+  let notMerge = false;
+  if (prevActivitiesLengthRef.current !== activities.length) {
+    notMerge = true;
+    prevActivitiesLengthRef.current = activities.length;
+  }
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<any>(null);
+
+  const resizableChart = useMemo(() => ({
+    resize: () => {
+      const chartInstance = chartRef.current?.getEchartsInstance();
+      if (chartInstance) {
+        chartInstance.resize();
+      }
+    }
+  }), []);
+
+  useChartResize(containerRef, resizableChart);
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -226,11 +254,12 @@ export function LoadChart({
       </div>
       
       <div className="load-split-container">
-        <div style={{ flex: 1, height: "100%", minHeight: 0 }}>
+        <div ref={containerRef} style={{ flex: 1, height: "100%", minHeight: 0 }}>
           <ReactECharts 
+            ref={chartRef}
             option={chartOption} 
             onChartReady={enableChartWheelPageScroll}
-            notMerge 
+            notMerge={notMerge} 
             style={{ height: "100%", width: "100%" }} 
           />
         </div>

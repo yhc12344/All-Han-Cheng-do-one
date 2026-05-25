@@ -48,6 +48,16 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit, isS
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
   const { t } = useTranslation();
 
+  const prevCompareIdsRef = useRef<number[]>(compareIds);
+  let notMerge = false;
+  if (
+    prevCompareIdsRef.current.length !== compareIds.length ||
+    prevCompareIdsRef.current.some((id, idx) => id !== compareIds[idx])
+  ) {
+    notMerge = true;
+    prevCompareIdsRef.current = compareIds;
+  }
+
   const chartInstancesRef = useRef<any[]>([]);
   const isDispatchingRef = useRef(false);
 
@@ -313,10 +323,10 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit, isS
           {t("compare.resetZoom")}
         </button>
       </div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 3)} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 0)} notMerge={notMerge} style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 1)} notMerge={notMerge} style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 2)} notMerge={notMerge} style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={(inst) => registerChart(inst, 3)} notMerge={notMerge} style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }

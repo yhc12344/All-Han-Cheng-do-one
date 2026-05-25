@@ -159,13 +159,73 @@ fn title_case_sport(sport: &str) -> String {
     first.to_uppercase().collect::<String>() + chars.as_str()
 }
 
+fn get_singapore_neighbourhood(lat: f64, lon: f64) -> Option<&'static str> {
+    let nhs = [
+        ("Woodlands", 1.4368, 103.7865),
+        ("Punggol", 1.3984, 103.9072),
+        ("Sengkang", 1.3916, 103.8954),
+        ("Yishun", 1.4295, 103.8350),
+        ("Jurong West", 1.3396, 103.7073),
+        ("Tampines", 1.3525, 103.9447),
+        ("Pasir Ris", 1.3721, 103.9474),
+        ("Changi", 1.3644, 103.9915),
+        ("Bedok", 1.3236, 103.9273),
+        ("Ang Mo Kio", 1.3691, 103.8454),
+        ("Bishan", 1.3526, 103.8468),
+        ("Toa Payoh", 1.3343, 103.8563),
+        ("Bukit Timah", 1.3294, 103.7956),
+        ("Clementi", 1.3150, 103.7652),
+        ("Queenstown", 1.2942, 103.8059),
+        ("Bukit Merah", 1.2819, 103.8239),
+        ("Downtown Core", 1.2874, 103.8530),
+        ("Newton", 1.3048, 103.8318),
+        ("Geylang", 1.3201, 103.8918),
+        ("Hougang", 1.3713, 103.8865),
+        ("Kallang", 1.3100, 103.8651),
+        ("Novena", 1.3205, 103.8437),
+        ("Choa Chu Kang", 1.3840, 103.7470),
+        ("Bukit Batok", 1.3590, 103.7526),
+        ("Sembawang", 1.4480, 103.8200),
+        ("Kranji", 1.4250, 103.7460),
+        ("Lim Chu Kang", 1.4340, 103.7020),
+        ("Tuas", 1.2940, 103.6210),
+        ("Sentosa", 1.2494, 103.8303),
+        ("MacRitchie", 1.3690, 103.8020),
+    ];
+
+    let mut closest_name = None;
+    let mut min_dist = f64::MAX;
+
+    for (name, nh_lat, nh_lon) in nhs {
+        let dist = haversine_m(lat, lon, nh_lat, nh_lon);
+        if dist < min_dist {
+            min_dist = dist;
+            closest_name = Some(name);
+        }
+    }
+
+    closest_name
+}
+
 fn build_activity_name(file_name: &str, sport: &str, points: &[RecordPoint]) -> String {
     let fallback = strip_known_extension(file_name);
     let sport_label = title_case_sport(sport);
 
     if let Some(pos) = points.iter().find(|p| p.latitude.is_some() && p.longitude.is_some()) {
+        let lat = pos.latitude.unwrap();
+        let lon = pos.longitude.unwrap();
+
+        // Check if coordinate is within the Singapore national bounding box.
+        // This resolves low-density reverse-geocoder mismatch mapping northern coast runs to neighboring Malaysian cities.
+        if lat >= 1.13 && lat <= 1.48 && lon >= 103.59 && lon <= 104.1 {
+            if let Some(nh) = get_singapore_neighbourhood(lat, lon) {
+                return format!("{}, Singapore — {}", nh, sport_label);
+            }
+            return format!("Singapore — {}", sport_label);
+        }
+
         let geocoder = reverse_geocoder::ReverseGeocoder::new();
-        let result = geocoder.search((pos.latitude.unwrap(), pos.longitude.unwrap()));
+        let result = geocoder.search((lat, lon));
         let record = result.record;
 
         let mut loc_parts = Vec::new();
