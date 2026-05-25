@@ -463,7 +463,11 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                             speed_m_s = v;
                         }
                     }
-                    "cadence" => cadence = value_i64(field.value()),
+                    "cadence" | "enhanced_cadence" => {
+                        if cadence.is_none() {
+                            cadence = value_i64(field.value());
+                        }
+                    }
                     "heart_rate" => heart_rate = value_i64(field.value()),
                     "power" => power = value_i64(field.value()),
                     "temperature" => temperature_c = value_f64(field.value()),
@@ -501,6 +505,17 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_heart_rate" => session_avg_heart_rate = value_i64(field.value()),
                     "max_cadence" => session_max_cadence = value_i64(field.value()),
                     "avg_cadence" => session_avg_cadence = value_i64(field.value()),
+                    // Garmin running FIT files use these instead of the generic cadence fields
+                    "max_running_cadence" => {
+                        if session_max_cadence.is_none() {
+                            session_max_cadence = value_i64(field.value());
+                        }
+                    }
+                    "avg_running_cadence" => {
+                        if session_avg_cadence.is_none() {
+                            session_avg_cadence = value_i64(field.value());
+                        }
+                    }
                     "total_elapsed_time" => session_total_elapsed_time_s = value_f64(field.value()),
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
                     "total_calories" => session_total_calories = value_i64(field.value()),
@@ -657,6 +672,17 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "total_descent" => lap_total_descent_m = value_f64(field.value()),
                     "avg_cadence" => lap_avg_cadence = value_i64(field.value()),
                     "max_cadence" => lap_max_cadence = value_i64(field.value()),
+                    // Garmin running FIT files use these instead of the generic cadence fields
+                    "avg_running_cadence" => {
+                        if lap_avg_cadence.is_none() {
+                            lap_avg_cadence = value_i64(field.value());
+                        }
+                    }
+                    "max_running_cadence" => {
+                        if lap_max_cadence.is_none() {
+                            lap_max_cadence = value_i64(field.value());
+                        }
+                    }
                     "total_calories" => lap_total_calories = value_i64(field.value()),
                     _ => {}
                 }

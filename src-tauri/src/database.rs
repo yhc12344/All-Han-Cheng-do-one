@@ -180,6 +180,9 @@ impl Database {
         // Repair mis-geocoded border locations and generic names with high-fidelity Singapore planning area neighborhoods
         self.repair_singapore_activity_names(&conn)?;
 
+        // Backfill avg_cadence/max_cadence in metadata_json from records for activities missing them.
+        self.backfill_cadence_in_metadata(&conn)?;
+
         // Re-assert indexes after any table rebuild migration.
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_records_activity_time ON records(activity_id, timestamp_ms)",
@@ -726,6 +729,94 @@ impl Database {
     pub fn delete_setting(&self, key: &str) -> Result<()> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
+    /// Backfill avg_cadence / max_cadence in metadata_json for activities that are
+    /// missing them, by computing from the per-record cadence column.
+    fn backfill_cadence_in_metadata(&self, conn: &Connection) -> Result<()> {
+        // Find activities where session.avg_cadence is null/missing in metadata_json
+        let mut find_stmt = conn.prepare(
+            r#"
+            SELECT id, metadata_json
+            FROM activities
+            WHERE metadata_json IS NOT NULL
+              AND (
+                  json_extract(metadata_json, '$.session.avg_cadence') IS NULL
+                  OR json_extract(metadata_json, '$.session.avg_cadence') = 'null'
+              )
+            "#,
+        )?;
+
+        let candidates: Vec<(i64, String)> = find_stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if candidates.is_empty() {
+            return Ok(());
+        }
+
+        tracing::info!(
+            count = candidates.len(),
+            "backfilling avg_cadence/max_cadence from records into metadata_json"
+        );
+
+        let mut cadence_stmt = conn.prepare(
+            r#"
+            SELECT AVG(cadence) AS avg_cad, MAX(cadence) AS max_cad
+            FROM records
+            WHERE activity_id = ?1 AND cadence IS NOT NULL AND cadence > 0
+            "#,
+        )?;
+
+        let mut update_stmt = conn.prepare(
+            "UPDATE activities SET metadata_json = ?1 WHERE id = ?2",
+        )?;
+
+        let mut patched = 0usize;
+        for (activity_id, meta_json) in &candidates {
+            let result: (Option<f64>, Option<i64>) = cadence_stmt
+                .query_row(params![activity_id], |row| {
+                    Ok((
+                        row.get::<_, Option<f64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                    ))
+                })?;
+
+            let (avg_cad, max_cad) = result;
+            if avg_cad.is_none() || avg_cad == Some(0.0) {
+                continue; // No cadence data in records for this activity
+            }
+
+            // Parse the metadata JSON and inject the cadence values into session
+            let mut meta: serde_json::Value = match serde_json::from_str(meta_json) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if let Some(session) = meta.get_mut("session").and_then(|s| s.as_object_mut()) {
+                if let Some(avg) = avg_cad {
+                    session.insert(
+                        "avg_cadence".to_string(),
+                        serde_json::json!(avg.round() as i64),
+                    );
+                }
+                if let Some(max) = max_cad {
+                    session.insert("max_cadence".to_string(), serde_json::json!(max));
+                }
+            }
+
+            let updated_json = meta.to_string();
+            update_stmt.execute(params![updated_json, activity_id])?;
+            patched += 1;
+        }
+
+        if patched > 0 {
+            tracing::info!(patched, "cadence backfill migration completed");
+        }
         Ok(())
     }
 
